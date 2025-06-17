@@ -1,6 +1,7 @@
 mod error;
-pub mod operations;
+mod operations;
 mod orchestrator;
+mod recipe;
 
 use std::{collections::HashSet, process::exit, sync::Arc, time::Duration, vec};
 use tokio::{
