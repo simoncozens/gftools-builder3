@@ -2,15 +2,13 @@ pub mod buildstatic;
 pub mod buildvariable;
 pub mod glyphs2ufo;
 
+use crate::{error::ApplicationError, orchestrator::BuildId};
+use async_trait::async_trait;
 use std::{
     hash::{Hash, Hasher},
     process::Output,
     sync::Arc,
 };
-
-use async_trait::async_trait;
-
-use crate::{error::ApplicationError, ir::BuildId};
 
 #[async_trait]
 pub trait Operation: Send + Sync {

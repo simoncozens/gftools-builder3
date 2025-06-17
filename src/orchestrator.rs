@@ -1,13 +1,67 @@
-use crate::{context::Context, error::ApplicationError, ir::BuildId, operations::Operation};
+//! Build orchestrator module
+//!
+//! This code was heavily, heavily adopted from aviqqe/turtle-build.
+//! Many thanks to Yota Toyama for making this code available under the MIT/Apache licenses.
+//! A parallel build system in just under 200 lines of Rust is astonishing.
+use crate::{error::ApplicationError, operations::Operation};
 use async_recursion::async_recursion;
+use dashmap::DashMap;
 use futures::future::{FutureExt, Shared, try_join_all};
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    error::Error,
+    future::Future,
+    hash::Hash,
+    pin::Pin,
+    process::Output,
+    sync::Arc,
+};
 use tokio::{
     io::{AsyncWriteExt, stderr, stdout},
+    process::Command,
     spawn,
+    sync::{Mutex, Semaphore},
     time::Instant,
     try_join,
 };
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct BuildId(u64);
+
+impl BuildId {
+    pub fn new(id: u64) -> Self {
+        Self(id)
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct Configuration {
+    jobs: HashMap<Arc<BuildId>, Arc<Box<dyn Operation>>>,
+    final_targets: HashSet<Arc<BuildId>>,
+    build_directory: Option<Arc<str>>,
+}
+
+impl Configuration {
+    pub fn new(final_targets: HashSet<Arc<BuildId>>, build_directory: Option<Arc<str>>) -> Self {
+        Self {
+            jobs: Default::default(),
+            final_targets,
+            build_directory,
+        }
+    }
+
+    pub fn jobs(&self) -> &HashMap<Arc<BuildId>, Arc<Box<dyn Operation>>> {
+        &self.jobs
+    }
+
+    pub fn final_targets(&self) -> &HashSet<Arc<BuildId>> {
+        &self.final_targets
+    }
+
+    pub fn add_job(&mut self, build: Box<dyn Operation>) {
+        self.jobs.insert(build.id().into(), Arc::new(build));
+    }
+}
 
 type BuildStep = Arc<Box<dyn Operation>>;
 
@@ -112,4 +166,52 @@ async fn run_op(context: &Context, op: &BuildStep) -> Result<(), ApplicationErro
     }
 
     Ok(())
+}
+
+pub struct Context {
+    command_semaphore: Semaphore,
+    /// Just a thing that you lock to print to the console.
+    console: Mutex<()>,
+    pub configuration: Arc<Configuration>,
+    pub build_futures: DashMap<BuildId, BuildFuture>,
+}
+
+impl Context {
+    pub fn new(job_limit: usize, configuration: Arc<Configuration>) -> Self {
+        Self {
+            command_semaphore: Semaphore::new(job_limit),
+            console: Mutex::new(()),
+            configuration,
+            build_futures: DashMap::new(),
+        }
+    }
+
+    pub fn console(&self) -> &Mutex<()> {
+        &self.console
+    }
+
+    pub async fn run_with_semaphore(
+        &self,
+        fnc: impl Fn() -> Result<Output, ApplicationError>,
+    ) -> Result<Output, Box<dyn Error>> {
+        let permit = self.command_semaphore.acquire().await?;
+        let output = fnc()?;
+
+        drop(permit);
+
+        Ok(output)
+    }
+}
+
+#[allow(dead_code)]
+async fn run_cross_platform(command: &str) -> Result<Output, std::io::Error> {
+    if cfg!(target_os = "windows") {
+        let components = command.split_whitespace().collect::<Vec<_>>();
+        Command::new(components[0])
+            .args(&components[1..])
+            .output()
+            .await
+    } else {
+        Command::new("sh").arg("-ec").arg(command).output().await
+    }
 }

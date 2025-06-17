@@ -1,6 +1,6 @@
 use std::{process::Output, sync::Arc};
 
-use crate::{error::ApplicationError, ir::BuildId, operations::Operation};
+use crate::{error::ApplicationError, operations::Operation, orchestrator::BuildId};
 
 pub(crate) struct Glyphs2UFO {
     pub source: String,
@@ -31,7 +31,7 @@ impl Operation for Glyphs2UFO {
             .collect()
     }
 
-    fn dependencies(&self) -> &[std::sync::Arc<crate::ir::BuildId>] {
+    fn dependencies(&self) -> &[std::sync::Arc<BuildId>] {
         &self.dependencies
     }
 }

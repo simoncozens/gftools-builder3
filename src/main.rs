@@ -1,10 +1,7 @@
-mod context;
 mod error;
-mod ir;
 pub mod operations;
-mod run;
+mod orchestrator;
 
-use context::Context;
 use std::{collections::HashSet, process::exit, sync::Arc, time::Duration, vec};
 use tokio::{
     io::{AsyncWriteExt, stderr},
@@ -12,10 +9,10 @@ use tokio::{
 };
 
 use crate::{
-    ir::Configuration,
     operations::{
         Operation, buildstatic::BuildStatic, buildvariable::BuildVariable, glyphs2ufo::Glyphs2UFO,
     },
+    orchestrator::{Configuration, Context},
 };
 
 #[tokio::main]
@@ -66,7 +63,7 @@ async fn main() {
     // configuration.add_job(fix.into());
 
     let context = Arc::new(Context::new(job_limit, Arc::new(configuration.clone())));
-    if let Err(error) = run::run(&context).await {
+    if let Err(error) = orchestrator::run(&context).await {
         stderr()
             .write_all(format!("{error}\n").as_bytes())
             .await
