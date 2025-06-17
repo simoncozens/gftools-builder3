@@ -2,17 +2,17 @@ use std::{process::Output, sync::Arc};
 
 use crate::{error::ApplicationError, ir::BuildId, operations::Operation};
 
-pub(crate) struct Glyphs2UFO {
+pub(crate) struct BuildVariable {
     pub source: String,
-    pub outputs: Vec<String>,
+    pub output: String,
     pub dependencies: Vec<Arc<BuildId>>,
 }
 
-impl Operation for Glyphs2UFO {
+impl Operation for BuildVariable {
     fn execute(&self) -> Result<Output, ApplicationError> {
         let cmd = format!(
-            "fontmake -o ufo --instance-dir instance_ufo -g {}",
-            self.source
+            "fontmake -o variable -m {} --filter ... --filter FlattenComponentsFilter --filter DecomposeTransformedComponentsFilter --output-path {}",
+            self.source, self.output
         );
         std::process::Command::new("sh")
             .arg("-c")
@@ -20,15 +20,12 @@ impl Operation for Glyphs2UFO {
             .output()
             .map_err(|e| ApplicationError::Other(e.to_string()))
     }
-    fn description(&self) -> String {
-        format!("Convert glyphs file '{}' to UFO format", self.source)
-    }
 
+    fn description(&self) -> String {
+        format!("Build a variable font '{}'", self.source)
+    }
     fn outputs(&self) -> Vec<std::sync::Arc<str>> {
-        self.outputs
-            .iter()
-            .map(|s| std::sync::Arc::from(s.as_str()))
-            .collect()
+        vec![std::sync::Arc::from(self.output.as_str())]
     }
 
     fn dependencies(&self) -> &[std::sync::Arc<crate::ir::BuildId>] {

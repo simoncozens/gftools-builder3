@@ -1,8 +1,4 @@
-use crate::{
-    context::Context,
-    error::ApplicationError,
-    ir::{Build, BuildId, Rule},
-};
+use crate::{context::Context, error::ApplicationError, ir::BuildId, operations::Operation};
 use async_recursion::async_recursion;
 use futures::future::{FutureExt, Shared, try_join_all};
 use std::{future::Future, pin::Pin, sync::Arc};
@@ -13,12 +9,12 @@ use tokio::{
     try_join,
 };
 
+type BuildStep = Arc<Box<dyn Operation>>;
+
 type RawBuildFuture = Pin<Box<dyn Future<Output = Result<(), ApplicationError>> + Send>>;
 pub(crate) type BuildFuture = Shared<RawBuildFuture>;
 
 pub async fn run(context: &Arc<Context>) -> Result<(), ApplicationError> {
-    println!("Running with configuration: {:#?}", context.configuration);
-
     for target in context.configuration.final_targets() {
         trigger_build(
             context.clone(),
@@ -44,22 +40,16 @@ pub async fn run(context: &Arc<Context>) -> Result<(), ApplicationError> {
 }
 
 #[async_recursion]
-async fn trigger_build(context: Arc<Context>, build: &Arc<Build>) -> Result<(), ApplicationError> {
+async fn trigger_build(context: Arc<Context>, build: &BuildStep) -> Result<(), ApplicationError> {
     context.build_futures.entry(build.id()).or_insert_with(|| {
-        println!(
-            "Starting build {}: {:?}",
-            build.id(),
-            build.rule().and_then(|x| x.description())
-        );
         let future: RawBuildFuture = Box::pin(spawn_build(context.clone(), build.clone()));
-
         future.shared()
     });
 
     Ok(())
 }
 
-async fn spawn_build(context: Arc<Context>, build: Arc<Build>) -> Result<(), ApplicationError> {
+async fn spawn_build(context: Arc<Context>, build: BuildStep) -> Result<(), ApplicationError> {
     spawn(async move {
         let mut futures = vec![];
 
@@ -67,19 +57,11 @@ async fn spawn_build(context: Arc<Context>, build: Arc<Build>) -> Result<(), App
         for input in build.dependencies().iter() {
             futures.push(build_input(context.clone(), input).await?);
         }
-        println!(
-            "Build {} is waiting for some futures: {:?}",
-            build.id(),
-            futures
-        );
-
         try_join_all(futures).await?;
-        println!("Build {} is now running", build.id());
+        println!("Build {:?} is now running", build.description());
 
         // OK, we are ready.
-        if let Some(rule) = build.rule() {
-            run_rule(&context, rule).await?;
-        }
+        run_op(&context, &build).await?;
 
         Ok(())
     })
@@ -101,21 +83,19 @@ async fn build_input(
     )
 }
 
-async fn run_rule(context: &Context, rule: &Rule) -> Result<(), ApplicationError> {
+async fn run_op(context: &Context, op: &BuildStep) -> Result<(), ApplicationError> {
     let ((output, _duration), _console) = try_join!(
         async {
             let start_time = Instant::now();
-            let output = context.run(rule.command()).await?;
+            let output = context.run_with_semaphore(|| op.execute()).await?;
 
             Ok::<_, ApplicationError>((output, Instant::now() - start_time))
         },
         async {
             let console = context.console().lock().await;
 
-            if let Some(description) = rule.description() {
-                stderr().write_all(description.as_bytes()).await?;
-                stderr().write_all(b"\n").await?;
-            }
+            stderr().write_all(op.description().as_bytes()).await?;
+            stderr().write_all(b" done\n").await?;
 
             // debug!(context, console, "command: {}", rule.command());
 

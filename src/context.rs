@@ -1,12 +1,15 @@
-use std::error::Error;
-use std::process::Output;
-use std::sync::Arc;
+use std::{error::Error, process::Output, sync::Arc};
 
-use crate::ir::{BuildId, Configuration};
-use crate::run::BuildFuture;
+use crate::{
+    error::ApplicationError,
+    ir::{BuildId, Configuration},
+    run::BuildFuture,
+};
 use dashmap::DashMap;
-use tokio::process::Command;
-use tokio::sync::{Mutex, Semaphore};
+use tokio::{
+    process::Command,
+    sync::{Mutex, Semaphore},
+};
 
 pub struct Context {
     command_semaphore: Semaphore,
@@ -30,21 +33,27 @@ impl Context {
         &self.console
     }
 
-    pub async fn run(&self, command: &str) -> Result<Output, Box<dyn Error>> {
+    pub async fn run_with_semaphore(
+        &self,
+        fnc: impl Fn() -> Result<Output, ApplicationError>,
+    ) -> Result<Output, Box<dyn Error>> {
         let permit = self.command_semaphore.acquire().await?;
-
-        let output = if cfg!(target_os = "windows") {
-            let components = command.split_whitespace().collect::<Vec<_>>();
-            Command::new(components[0])
-                .args(&components[1..])
-                .output()
-                .await?
-        } else {
-            Command::new("sh").arg("-ec").arg(command).output().await?
-        };
+        let output = fnc()?;
 
         drop(permit);
 
         Ok(output)
+    }
+}
+
+async fn run_cross_platform(command: &str) -> Result<Output, std::io::Error> {
+    if cfg!(target_os = "windows") {
+        let components = command.split_whitespace().collect::<Vec<_>>();
+        Command::new(components[0])
+            .args(&components[1..])
+            .output()
+            .await
+    } else {
+        Command::new("sh").arg("-ec").arg(command).output().await
     }
 }

@@ -1,7 +1,7 @@
 mod context;
 mod error;
 mod ir;
-mod operations;
+pub mod operations;
 mod run;
 
 use context::Context;
@@ -11,63 +11,59 @@ use tokio::{
     time::sleep,
 };
 
-use crate::ir::{Build, Configuration, Rule};
+use crate::{
+    ir::Configuration,
+    operations::{
+        Operation, buildstatic::BuildStatic, buildvariable::BuildVariable, glyphs2ufo::Glyphs2UFO,
+    },
+};
 
 #[tokio::main]
 async fn main() {
     let job_limit = num_cpus::get();
-    let fontmake_ufo = Build::new(
-        vec![
-            Arc::from("master_ufo/Nunito.designspace"),
-            Arc::from("master_ufo/Nunito-Heavy.ufo"),
-            Arc::from("master_ufo/Nunito-Bold.ufo"),
-            Arc::from("master_ufo/Nunito-HeavyItalic.ufo"),
-            Arc::from("master_ufo/Nunito-ExtraLightItalic.ufo"),
-            Arc::from("master_ufo/Nunito-ExtraLight.ufo"),
-            Arc::from("master_ufo/Nunito-BoldItalic.ufo"),
+    let fontmake_ufo = Glyphs2UFO {
+        source: "Nunito.glyphs".to_string(),
+        outputs: vec![
+            "master_ufo/Nunito.designspace".to_string(),
+            "master_ufo/Nunito-Heavy.ufo".to_string(),
+            "master_ufo/Nunito-Bold.ufo".to_string(),
+            "master_ufo/Nunito-HeavyItalic.ufo".to_string(),
+            "master_ufo/Nunito-ExtraLightItalic.ufo".to_string(),
+            "master_ufo/Nunito-ExtraLight.ufo".to_string(),
+            "master_ufo/Nunito-BoldItalic.ufo".to_string(),
         ],
-        Some(Rule::new(
-            "fontmake -o ufo --instance-dir instance_ufo -g Nunito.glyphs",
-            Some("Convert glyphs file to UFO".to_string()),
-        )),
-        vec![],
-    );
-    let build_vf = Build::new(
-        vec![Arc::from("../fonts/variable/Nunito[ital,wght].ttf")],
-        Some(Rule::new(
-            "fontmake -o variable -m master_ufo/Nunito.designspace --filter ... --filter FlattenComponentsFilter --filter DecomposeTransformedComponentsFilter --output-path ../fonts/variable/Nunito[ital,wght].ttf",
-            Some("Build a variable font from Designspace".to_string()),
-        )),
-        vec![fontmake_ufo.id().into()],
-    );
+        dependencies: vec![],
+    };
+    let build_vf = BuildVariable {
+        source: "master_ufo/Nunito.designspace".to_string(),
+        output: "../fonts/variable/Nunito[ital,wght].ttf".to_string(),
+        dependencies: vec![fontmake_ufo.id().into()],
+    };
+    let build_heavy = BuildStatic {
+        source: "master_ufo/Nunito-Heavy.ufo".to_string(),
+        output: "../fonts/ttf/Nunito-Heavy.ttf".to_string(),
+        dependencies: vec![fontmake_ufo.id().into()],
+    };
+    let build_bold = BuildStatic {
+        source: "master_ufo/Nunito-Bold.ufo".to_string(),
+        output: "../fonts/ttf/Nunito-Bold.ttf".to_string(),
+        dependencies: vec![fontmake_ufo.id().into()],
+    };
 
-    let gen_stat = Build::new(
-        vec![Arc::from(
-            "../fonts/variable/Nunito[ital,wght].ttf.statstamp",
-        )],
-        Some(Rule::new(
-            "gftools-gen-stat --inplace  -- ../fonts/variable/Nunito[ital,wght].ttf  && touch ../fonts/variable/Nunito[ital,wght].ttf.statstamp",
-            Some("Add a STAT table to a set of variable fonts".to_string()),
-        )),
-        vec![build_vf.id().into()],
-    );
-    let fix = Build::new(
-        vec![Arc::from(
-            "../fonts/variable/Nunito[ital,wght].ttf.fixstamp",
-        )],
-        Some(Rule::new(
-            "gftools-fix-font -o ../fonts/variable/Nunito[ital,wght].ttf  ../fonts/variable/Nunito[ital,wght].ttf && touch ../fonts/variable/Nunito[ital,wght].ttf.fixstamp",
-            Some("Run the font fixer in-place and touch a stamp file".to_string()),
-        )),
-        vec![build_vf.id().into(), gen_stat.id().into()],
-    );
+    let top_levels: Vec<Box<&dyn Operation>> = vec![
+        Box::new(&build_vf),
+        Box::new(&build_heavy),
+        Box::new(&build_bold),
+    ];
 
-    let default_outputs = HashSet::from_iter([&fix].iter().map(|s| s.id().into()));
+    let default_outputs = HashSet::from_iter(top_levels.iter().map(|s| s.id().into()));
     let mut configuration = Configuration::new(default_outputs, None);
-    configuration.add_job(build_vf.into());
-    configuration.add_job(fontmake_ufo.into());
-    configuration.add_job(gen_stat.into());
-    configuration.add_job(fix.into());
+    configuration.add_job(Box::new(build_vf));
+    configuration.add_job(Box::new(build_heavy));
+    configuration.add_job(Box::new(build_bold));
+    configuration.add_job(Box::new(fontmake_ufo));
+    // configuration.add_job(gen_stat.into());
+    // configuration.add_job(fix.into());
 
     let context = Arc::new(Context::new(job_limit, Arc::new(configuration.clone())));
     if let Err(error) = run::run(&context).await {

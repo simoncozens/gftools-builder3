@@ -1,9 +1,11 @@
 use std::{
-    collections::{HashMap, HashSet, hash_map::DefaultHasher},
+    collections::{HashMap, HashSet},
     fmt::Display,
-    hash::{Hash, Hasher},
+    hash::Hash,
     sync::Arc,
 };
+
+use crate::operations::Operation;
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct BuildId(u64);
@@ -19,54 +21,9 @@ impl BuildId {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Build {
-    // IDs are persistent across different builds so that they can be used for,
-    // for example, caching.
-    id: BuildId,
-    outputs: Vec<Arc<str>>,
-    rule: Option<Rule>,
-    dependencies: Vec<Arc<BuildId>>,
-}
-
-impl Build {
-    pub fn new(
-        outputs: Vec<Arc<str>>,
-        rule: Option<Rule>,
-        dependencies: Vec<Arc<BuildId>>,
-    ) -> Self {
-        Self {
-            id: Self::calculate_id(&outputs),
-            outputs,
-            rule,
-            dependencies,
-        }
-    }
-
-    pub fn id(&self) -> BuildId {
-        self.id
-    }
-
-    pub fn rule(&self) -> Option<&Rule> {
-        self.rule.as_ref()
-    }
-
-    pub fn dependencies(&self) -> &[Arc<BuildId>] {
-        &self.dependencies
-    }
-
-    fn calculate_id(outputs: &[Arc<str>]) -> BuildId {
-        let mut hasher = DefaultHasher::new();
-
-        outputs.hash(&mut hasher);
-
-        BuildId::new(hasher.finish())
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Configuration {
-    jobs: HashMap<Arc<BuildId>, Arc<Build>>,
+    jobs: HashMap<Arc<BuildId>, Arc<Box<dyn Operation>>>,
     final_targets: HashSet<Arc<BuildId>>,
     build_directory: Option<Arc<str>>,
 }
@@ -80,7 +37,7 @@ impl Configuration {
         }
     }
 
-    pub fn jobs(&self) -> &HashMap<Arc<BuildId>, Arc<Build>> {
+    pub fn jobs(&self) -> &HashMap<Arc<BuildId>, Arc<Box<dyn Operation>>> {
         &self.jobs
     }
 
@@ -88,30 +45,7 @@ impl Configuration {
         &self.final_targets
     }
 
-    pub fn add_job(&mut self, build: Arc<Build>) {
-        self.jobs.insert(build.id().into(), build);
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Rule {
-    command: String,
-    description: Option<String>,
-}
-
-impl Rule {
-    pub fn new(command: impl Into<String>, description: Option<String>) -> Self {
-        Self {
-            command: command.into(),
-            description,
-        }
-    }
-
-    pub fn command(&self) -> &str {
-        &self.command
-    }
-
-    pub fn description(&self) -> Option<&str> {
-        self.description.as_deref()
+    pub fn add_job(&mut self, build: Box<dyn Operation>) {
+        self.jobs.insert(build.id().into(), Arc::new(build));
     }
 }
