@@ -6,7 +6,6 @@ use crate::error::ApplicationError;
 use async_trait::async_trait;
 use dashmap::DashMap;
 use std::{
-    hash::{Hash, Hasher},
     os::unix::process::ExitStatusExt,
     process::{ExitStatus, Output},
     sync::{Arc, Mutex},

@@ -9,13 +9,7 @@ use dashmap::DashMap;
 use futures::future::{FutureExt, Shared, try_join_all};
 use petgraph::{Direction, Graph, graph::NodeIndex, visit::EdgeRef};
 use std::{
-    collections::{HashMap, HashSet},
-    error::Error,
-    future::Future,
-    hash::Hash,
-    pin::Pin,
-    process::Output,
-    sync::Arc,
+    collections::HashSet, error::Error, future::Future, pin::Pin, process::Output, sync::Arc,
 };
 use tokio::{
     io::{AsyncWriteExt, stderr, stdout},
@@ -28,15 +22,11 @@ use tokio::{
 // #[derive(Clone)]
 pub struct Configuration {
     graph: Graph<BuildStep, String>,
-    build_directory: Option<Arc<str>>,
 }
 
 impl Configuration {
-    pub fn new(graph: Graph<BuildStep, String>, build_directory: Option<Arc<str>>) -> Self {
-        Self {
-            graph,
-            build_directory,
-        }
+    pub fn new(graph: Graph<BuildStep, String>) -> Self {
+        Self { graph }
     }
 
     pub fn graph(&self) -> &Graph<BuildStep, String> {
@@ -101,7 +91,7 @@ async fn spawn_build(context: Arc<Context>, index: NodeIndex) -> Result<(), Appl
         println!("Build {:?} is now running", build.description());
 
         // OK, we are ready.
-        run_op(&context, &build).await?;
+        run_op(&context, build).await?;
 
         Ok(())
     })
@@ -116,7 +106,7 @@ async fn build_input(
     context
         .build_futures
         .get(&input)
-        .ok_or_else(|| ApplicationError::Build)
+        .ok_or(ApplicationError::Build)
         .map(|f| f.clone())
         .map_err(|_| ApplicationError::Build)
 }

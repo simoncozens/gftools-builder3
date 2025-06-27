@@ -40,7 +40,7 @@ impl Operation for Glyphs2UFO {
             .output()
             .map_err(|e| ApplicationError::Other(e.to_string()))?;
         self._jobcontext.update_from_output(output)?;
-        self._jobcontext.update_from_files_on_disk(&self.outputs);
+        self._jobcontext.update_from_files_on_disk(&self.outputs)?;
         self._jobcontext.output().clone()
     }
     fn description(&self) -> String {

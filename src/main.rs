@@ -3,7 +3,7 @@ mod operations;
 mod orchestrator;
 mod recipe;
 
-use std::{collections::HashSet, process::exit, sync::Arc, time::Duration, vec};
+use std::{process::exit, sync::Arc, time::Duration, vec};
 use tokio::{
     io::{AsyncWriteExt, stderr},
     time::sleep,
@@ -17,9 +17,8 @@ use crate::{
 };
 
 use petgraph::{
-    Direction::{self, Incoming},
-    graph::{Graph, NodeIndex},
-    visit::{EdgeRef, NodeRef},
+    Direction::{self},
+    graph::Graph,
 };
 
 #[tokio::main]
@@ -87,7 +86,7 @@ async fn main() {
             .collect::<Vec<_>>()
     );
 
-    let configuration = Configuration::new(g, None);
+    let configuration = Configuration::new(g);
 
     let context = Arc::new(Context::new(job_limit, Arc::new(configuration)));
     if let Err(error) = orchestrator::run(&context).await {
