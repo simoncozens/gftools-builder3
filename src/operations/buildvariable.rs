@@ -1,24 +1,36 @@
-use std::{process::Output, sync::Arc};
-
-use crate::{error::ApplicationError, operations::Operation, orchestrator::BuildId};
+use crate::{
+    error::ApplicationError,
+    operations::{JobContext, Operation, Output},
+};
 
 pub(crate) struct BuildVariable {
     pub source: String,
     pub output: String,
-    pub dependencies: Vec<Arc<BuildId>>,
+    _jobcontext: JobContext,
 }
 
+impl BuildVariable {
+    pub fn new(source: String, output: String) -> Self {
+        Self {
+            _jobcontext: JobContext::new(),
+            source,
+            output,
+        }
+    }
+}
 impl Operation for BuildVariable {
+    fn shortname(&self) -> &str {
+        "BuildVariable"
+    }
+    fn jobcontext(&self) -> &JobContext {
+        &self._jobcontext
+    }
     fn execute(&self) -> Result<Output, ApplicationError> {
         let cmd = format!(
             "fontmake -o variable -m {} --filter ... --filter FlattenComponentsFilter --filter DecomposeTransformedComponentsFilter --output-path {}",
             self.source, self.output
         );
-        std::process::Command::new("sh")
-            .arg("-c")
-            .arg(cmd)
-            .output()
-            .map_err(|e| ApplicationError::Other(e.to_string()))
+        self.run_shell_command(&cmd, std::slice::from_ref(&self.output))
     }
 
     fn description(&self) -> String {
@@ -26,9 +38,5 @@ impl Operation for BuildVariable {
     }
     fn outputs(&self) -> Vec<std::sync::Arc<str>> {
         vec![std::sync::Arc::from(self.output.as_str())]
-    }
-
-    fn dependencies(&self) -> &[std::sync::Arc<BuildId>] {
-        &self.dependencies
     }
 }

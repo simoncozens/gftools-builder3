@@ -1,4 +1,4 @@
-use std::error::Error;
+use std::{error::Error, sync::PoisonError};
 use thiserror::Error;
 use tokio::{io, task::JoinError};
 
@@ -10,6 +10,8 @@ pub enum ApplicationError {
     DefaultOutputNotFound,
     #[error("{0}")]
     Other(String),
+    #[error("Mutex was poisoned")]
+    MutexPoisoned,
 }
 
 impl From<Box<dyn Error>> for ApplicationError {
@@ -27,5 +29,11 @@ impl From<io::Error> for ApplicationError {
 impl From<JoinError> for ApplicationError {
     fn from(error: JoinError) -> Self {
         Self::Other(error.to_string())
+    }
+}
+
+impl<T> From<PoisonError<T>> for ApplicationError {
+    fn from(_: PoisonError<T>) -> Self {
+        Self::MutexPoisoned
     }
 }
