@@ -83,11 +83,10 @@ impl JobContext {
 
 #[async_trait]
 pub trait Operation: Send + Sync {
-    fn execute(&self) -> Result<Output, ApplicationError>;
+    fn execute(&self, inputs: &[String], outputs: &[String]) -> Result<Output, ApplicationError>;
     fn description(&self) -> String;
     fn shortname(&self) -> &str;
-    fn jobcontext(&self) -> &JobContext;
-    fn outputs(&self) -> Vec<Arc<str>>;
+    // fn jobcontext(&self) -> &JobContext;
 
     fn run_shell_command(&self, cmd: &str, outputs: &[String]) -> Result<Output, ApplicationError> {
         let output = std::process::Command::new("sh")
@@ -95,9 +94,10 @@ pub trait Operation: Send + Sync {
             .arg(cmd)
             .output()
             .map_err(|e| ApplicationError::Other(e.to_string()))?;
-        self.jobcontext().update_from_output(output)?;
-        self.jobcontext().update_from_files_on_disk(outputs)?;
-        self.jobcontext().output().clone()
+        Ok(output)
+        // self.jobcontext().update_from_output(output)?;
+        // self.jobcontext().update_from_files_on_disk(outputs)?;
+        // self.jobcontext().output().clone()
     }
 }
 
@@ -105,4 +105,36 @@ impl std::fmt::Debug for dyn Operation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.shortname())
     }
+}
+
+pub(crate) enum SourceSink {
+    Source,
+    Sink,
+}
+impl Operation for SourceSink {
+    fn execute(&self, inputs: &[String], outputs: &[String]) -> Result<Output, ApplicationError> {
+        Ok(Output {
+            status: ExitStatus::from_raw(0),
+            stdout: inputs.join("\n").into_bytes(),
+            stderr: Vec::new(),
+        })
+    }
+
+    fn description(&self) -> String {
+        match self {
+            SourceSink::Source => "Source Operation".to_string(),
+            SourceSink::Sink => "Sink Operation".to_string(),
+        }
+    }
+
+    fn shortname(&self) -> &str {
+        match self {
+            SourceSink::Source => "Source",
+            SourceSink::Sink => "Sink",
+        }
+    }
+
+    // fn jobcontext(&self) -> &JobContext {
+    //     &JobContext::new()
+    // }
 }

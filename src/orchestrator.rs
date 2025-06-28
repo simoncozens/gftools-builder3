@@ -84,14 +84,21 @@ async fn spawn_build(context: Arc<Context>, index: NodeIndex) -> Result<(), Appl
             .configuration
             .graph()
             .edges_directed(index, Direction::Incoming);
-        for input in in_edges {
-            futures.push(build_input(context.clone(), input.source()).await?);
+        let mut input_files = vec![];
+        let output_files = context
+            .configuration
+            .graph()
+            .edges_directed(index, Direction::Outgoing)
+            .map(|edge| edge.weight().clone())
+            .collect::<Vec<_>>();
+        for input_dependency in in_edges {
+            futures.push(build_input(context.clone(), input_dependency.source()).await?);
+            input_files.push(input_dependency.weight().clone());
         }
         try_join_all(futures).await?;
-        println!("Build {:?} is now running", build.description());
 
         // OK, we are ready.
-        run_op(&context, build).await?;
+        run_op(&context, build, &input_files, &output_files).await?;
 
         Ok(())
     })
@@ -111,20 +118,39 @@ async fn build_input(
         .map_err(|_| ApplicationError::Build)
 }
 
-async fn run_op(context: &Context, op: &BuildStep) -> Result<(), ApplicationError> {
+async fn run_op(
+    context: &Context,
+    op: &BuildStep,
+    inputs: &[String],
+    outputs: &[String],
+) -> Result<(), ApplicationError> {
+    let description = format!(
+        "{}: {} -> {}",
+        op.shortname(),
+        inputs.join(", "),
+        outputs.join(", ")
+    );
     let ((output, _duration), _console) = try_join!(
         async {
             let start_time = Instant::now();
-            let output = context.run_with_semaphore(|| op.execute()).await?;
+            if !inputs.is_empty() && !outputs.is_empty() {
+                stderr()
+                    .write_all(format!("Running {}\n", &description).as_bytes())
+                    .await?;
+            }
+            let output = context
+                .run_with_semaphore(|| op.execute(inputs, outputs))
+                .await?;
 
             Ok::<_, ApplicationError>((output, Instant::now() - start_time))
         },
         async {
             let console = context.console().lock().await;
-
-            stderr().write_all(op.description().as_bytes()).await?;
-            stderr().write_all(b" done\n").await?;
-
+            if !inputs.is_empty() && !outputs.is_empty() {
+                stderr()
+                    .write_all(format!("Finished {}\n", &description).as_bytes())
+                    .await?;
+            }
             // debug!(context, console, "command: {}", rule.command());
 
             Ok(console)
