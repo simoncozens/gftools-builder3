@@ -16,7 +16,7 @@ impl Operation for BuildVariable {
     ) -> Result<Output, ApplicationError> {
         let cmd = format!(
             "fontmake -o variable -g {} --filter ... --filter FlattenComponentsFilter --filter DecomposeTransformedComponentsFilter --output-path {}",
-            inputs[0].lock()?.to_filename(), outputs[0].lock()?.to_filename()
+            inputs[0].to_filename()?, outputs[0].to_filename()?
         );
         self.run_shell_command(&cmd, outputs)
     }

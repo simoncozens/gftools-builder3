@@ -18,7 +18,7 @@ impl Operation for Glyphs2UFO {
     ) -> Result<Output, ApplicationError> {
         let cmd = format!(
             "fontmake -o ufo -i --instance-dir instance_ufo -g {}",
-            inputs[0].lock()?.to_filename()
+            inputs[0].to_filename()?
         );
         self.run_shell_command(&cmd, outputs)
     }

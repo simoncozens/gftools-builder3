@@ -1,5 +1,6 @@
 pub mod buildstatic;
 pub mod buildvariable;
+pub mod fix;
 pub mod glyphs2ufo;
 
 use crate::error::ApplicationError;
@@ -23,18 +24,6 @@ pub struct OperationOutput(Arc<Mutex<RawOperationOutput>>);
 impl RawOperationOutput {
     pub fn from_str(s: &str) -> Self {
         Self::NamedFile(s.to_string())
-    }
-
-    pub fn to_filename(&self) -> String {
-        match self {
-            RawOperationOutput::NamedFile(name) => name.clone(),
-            RawOperationOutput::TemporaryFile(x) => {
-                panic!("Cannot convert TemporaryFile to filename")
-            }
-            RawOperationOutput::InMemoryBytes(_) => {
-                panic!("Cannot convert InMemoryBytes to filename")
-            }
-        }
     }
 }
 
@@ -71,8 +60,34 @@ impl std::fmt::Debug for OperationOutput {
         let raw_output = self.lock().map_err(|_| std::fmt::Error)?;
         match &*raw_output {
             RawOperationOutput::NamedFile(name) => write!(f, "NamedFile({})", name),
-            RawOperationOutput::TemporaryFile(_) => write!(f, "TemporaryFile"),
+            RawOperationOutput::TemporaryFile(None) => write!(f, "UnnamedTemporaryFile"),
+            RawOperationOutput::TemporaryFile(Some(x)) => {
+                write!(f, "NamedTemporaryFile({})", x.path().to_string_lossy())
+            }
             RawOperationOutput::InMemoryBytes(_) => write!(f, "InMemoryBytes"),
+        }
+    }
+}
+
+impl OperationOutput {
+    pub fn to_filename(&self) -> Result<String, ApplicationError> {
+        let mut f = self.lock().map_err(|_| ApplicationError::MutexPoisoned)?;
+        match &mut *f {
+            RawOperationOutput::NamedFile(name) => Ok(name.to_string()),
+            RawOperationOutput::TemporaryFile(x) => {
+                // if it's none, make one and set it to some
+                if let Some(temp_file) = x {
+                    Ok(temp_file.path().to_string_lossy().to_string())
+                } else {
+                    let temp_file =
+                        NamedTempFile::new().map_err(|e| ApplicationError::Other(e.to_string()))?;
+                    *x = Some(temp_file);
+                    Ok(x.as_ref().unwrap().path().to_string_lossy().to_string())
+                }
+            }
+            RawOperationOutput::InMemoryBytes(_) => {
+                panic!("Cannot convert InMemoryBytes to filename")
+            }
         }
     }
 }
