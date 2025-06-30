@@ -1,30 +1,22 @@
 use crate::{
     error::ApplicationError,
-    operations::{JobContext, Operation, Output},
+    operations::{Operation, OperationOutput, Output},
 };
 
-pub(crate) struct BuildVariable {
-    _jobcontext: JobContext,
-}
+pub(crate) struct BuildVariable;
 
-impl BuildVariable {
-    pub fn new() -> Self {
-        Self {
-            _jobcontext: JobContext::new(),
-        }
-    }
-}
 impl Operation for BuildVariable {
     fn shortname(&self) -> &str {
         "BuildVariable"
     }
-    // fn jobcontext(&self) -> &JobContext {
-    //     &self._jobcontext
-    // }
-    fn execute(&self, inputs: &[String], outputs: &[String]) -> Result<Output, ApplicationError> {
+    fn execute(
+        &self,
+        inputs: &[OperationOutput],
+        outputs: &[OperationOutput],
+    ) -> Result<Output, ApplicationError> {
         let cmd = format!(
             "fontmake -o variable -g {} --filter ... --filter FlattenComponentsFilter --filter DecomposeTransformedComponentsFilter --output-path {}",
-            inputs[0], outputs[0]
+            inputs[0].lock()?.to_filename(), outputs[0].lock()?.to_filename()
         );
         self.run_shell_command(&cmd, outputs)
     }

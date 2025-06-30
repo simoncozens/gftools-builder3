@@ -3,7 +3,7 @@
 //! This code was heavily, heavily adopted from aviqqe/turtle-build.
 //! Many thanks to Yota Toyama for making this code available under the MIT/Apache licenses.
 //! A parallel build system in just under 200 lines of Rust is astonishing.
-use crate::{error::ApplicationError, operations::Operation};
+use crate::{error::ApplicationError, operations::{Operation, OperationOutput}};
 use async_recursion::async_recursion;
 use dashmap::DashMap;
 use futures::future::{FutureExt, Shared, try_join_all};
@@ -19,17 +19,20 @@ use tokio::{
     try_join,
 };
 
+
+pub type BuildGraph = Graph<BuildStep, OperationOutput>;
+
 // #[derive(Clone)]
 pub struct Configuration {
-    graph: Graph<BuildStep, String>,
+    graph: BuildGraph,
 }
 
 impl Configuration {
-    pub fn new(graph: Graph<BuildStep, String>) -> Self {
+    pub fn new(graph: BuildGraph) -> Self {
         Self { graph }
     }
 
-    pub fn graph(&self) -> &Graph<BuildStep, String> {
+    pub fn graph(&self) -> &BuildGraph {
         &self.graph
     }
 }
@@ -85,7 +88,7 @@ async fn spawn_build(context: Arc<Context>, index: NodeIndex) -> Result<(), Appl
             .graph()
             .edges_directed(index, Direction::Incoming);
         let mut input_files = vec![];
-        let output_files = context
+        let output_files: Vec<OperationOutput> = context
             .configuration
             .graph()
             .edges_directed(index, Direction::Outgoing)
@@ -121,14 +124,14 @@ async fn build_input(
 async fn run_op(
     context: &Context,
     op: &BuildStep,
-    inputs: &[String],
-    outputs: &[String],
+    inputs: &[OperationOutput],
+    outputs: &[OperationOutput],
 ) -> Result<(), ApplicationError> {
     let description = format!(
         "{}: {} -> {}",
         op.shortname(),
-        inputs.join(", "),
-        outputs.join(", ")
+        inputs.iter().map(|x| format!("{x}")).collect::<Vec<_>>().join(", "),
+        outputs.iter().map(|x| format!("{x}")).collect::<Vec<_>>().join(", ")
     );
     let ((output, _duration), _console) = try_join!(
         async {

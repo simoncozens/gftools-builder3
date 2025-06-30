@@ -4,91 +4,95 @@ pub mod glyphs2ufo;
 
 use crate::error::ApplicationError;
 use async_trait::async_trait;
-use dashmap::DashMap;
 use std::{
     os::unix::process::ExitStatusExt,
     process::{ExitStatus, Output},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard},
 };
+use tempfile::NamedTempFile;
 
-#[derive(Clone, Debug)]
-enum File {
-    OnDisk(String),
-    InMemory(Vec<u8>),
+#[derive(Debug)]
+pub enum RawOperationOutput {
+    NamedFile(String),
+    TemporaryFile(Option<NamedTempFile>),
+    InMemoryBytes(Vec<u8>),
 }
+#[derive(Clone)]
+pub struct OperationOutput(Arc<Mutex<RawOperationOutput>>);
 
-#[derive(Clone, Debug)]
-pub(crate) struct Filesystem(DashMap<String, File>);
-impl Filesystem {
-    fn new() -> Self {
-        Self(DashMap::new())
+impl RawOperationOutput {
+    pub fn from_str(s: &str) -> Self {
+        Self::NamedFile(s.to_string())
     }
 
-    fn from_files_on_disk(files: &[String]) -> Self {
-        let map = files
-            .iter()
-            .map(|file| (file.clone(), File::OnDisk(file.to_string())))
-            .collect();
-        Self(map)
-    }
-
-    fn update_from_files_on_disk(&self, files: &[String]) {
-        for file in files {
-            self.0.insert(file.clone(), File::OnDisk(file.clone()));
+    pub fn to_filename(&self) -> String {
+        match self {
+            RawOperationOutput::NamedFile(name) => name.clone(),
+            RawOperationOutput::TemporaryFile(x) => {
+                panic!("Cannot convert TemporaryFile to filename")
+            }
+            RawOperationOutput::InMemoryBytes(_) => {
+                panic!("Cannot convert InMemoryBytes to filename")
+            }
         }
     }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct JobContextInner {
-    pub(crate) filesystem: Filesystem,
-    pub(crate) output: Output,
+impl From<&str> for RawOperationOutput {
+    fn from(s: &str) -> Self {
+        Self::from_str(s)
+    }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct JobContext {
-    inner: Arc<Mutex<JobContextInner>>,
+impl From<RawOperationOutput> for OperationOutput {
+    fn from(output: RawOperationOutput) -> Self {
+        Self(Arc::new(Mutex::new(output)))
+    }
+}
+impl OperationOutput {
+    pub fn lock(&self) -> Result<MutexGuard<RawOperationOutput>, ApplicationError> {
+        self.0.lock().map_err(|_| ApplicationError::MutexPoisoned)
+    }
 }
 
-impl JobContext {
-    pub fn new() -> Self {
-        Self {
-            inner: Arc::new(Mutex::new(JobContextInner {
-                filesystem: Filesystem::new(),
-                output: Output {
-                    status: ExitStatus::from_raw(0),
-                    stdout: Vec::new(),
-                    stderr: Vec::new(),
-                },
-            })),
+impl std::fmt::Display for OperationOutput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let raw_output = self.lock().map_err(|_| std::fmt::Error)?;
+        match &*raw_output {
+            RawOperationOutput::NamedFile(name) => write!(f, "{name}"),
+            RawOperationOutput::TemporaryFile(_) => write!(f, "<temporary file>"),
+            RawOperationOutput::InMemoryBytes(_) => write!(f, "<in-memory bytes>"),
         }
     }
+}
 
-    pub fn update_from_output(&self, output: Output) -> Result<(), ApplicationError> {
-        let mut inner = self.inner.lock()?;
-        inner.output = output;
-        Ok(())
-    }
-
-    pub fn update_from_files_on_disk(&self, files: &[String]) -> Result<(), ApplicationError> {
-        let inner = self.inner.lock()?;
-        inner.filesystem.update_from_files_on_disk(files);
-        Ok(())
-    }
-
-    pub fn output(&self) -> Result<Output, ApplicationError> {
-        Ok(self.inner.lock()?.output.clone())
+impl std::fmt::Debug for OperationOutput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let raw_output = self.lock().map_err(|_| std::fmt::Error)?;
+        match &*raw_output {
+            RawOperationOutput::NamedFile(name) => write!(f, "NamedFile({})", name),
+            RawOperationOutput::TemporaryFile(_) => write!(f, "TemporaryFile"),
+            RawOperationOutput::InMemoryBytes(_) => write!(f, "InMemoryBytes"),
+        }
     }
 }
 
 #[async_trait]
 pub trait Operation: Send + Sync {
-    fn execute(&self, inputs: &[String], outputs: &[String]) -> Result<Output, ApplicationError>;
+    fn execute(
+        &self,
+        inputs: &[OperationOutput],
+        outputs: &[OperationOutput],
+    ) -> Result<Output, ApplicationError>;
     fn description(&self) -> String;
     fn shortname(&self) -> &str;
     // fn jobcontext(&self) -> &JobContext;
 
-    fn run_shell_command(&self, cmd: &str, outputs: &[String]) -> Result<Output, ApplicationError> {
+    fn run_shell_command(
+        &self,
+        cmd: &str,
+        outputs: &[OperationOutput],
+    ) -> Result<Output, ApplicationError> {
         let output = std::process::Command::new("sh")
             .arg("-c")
             .arg(cmd)
@@ -112,10 +116,14 @@ pub(crate) enum SourceSink {
     Sink,
 }
 impl Operation for SourceSink {
-    fn execute(&self, inputs: &[String], outputs: &[String]) -> Result<Output, ApplicationError> {
+    fn execute(
+        &self,
+        inputs: &[OperationOutput],
+        outputs: &[OperationOutput],
+    ) -> Result<Output, ApplicationError> {
         Ok(Output {
             status: ExitStatus::from_raw(0),
-            stdout: inputs.join("\n").into_bytes(),
+            stdout: Vec::new(),
             stderr: Vec::new(),
         })
     }
@@ -133,8 +141,4 @@ impl Operation for SourceSink {
             SourceSink::Sink => "Sink",
         }
     }
-
-    // fn jobcontext(&self) -> &JobContext {
-    //     &JobContext::new()
-    // }
 }

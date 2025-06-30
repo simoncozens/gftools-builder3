@@ -11,22 +11,21 @@ use tokio::{
 
 use crate::{
     operations::{
-        Operation, SourceSink, buildstatic::BuildStatic, buildvariable::BuildVariable,
-        glyphs2ufo::Glyphs2UFO,
+        buildstatic::BuildStatic, buildvariable::BuildVariable, glyphs2ufo::Glyphs2UFO, Operation, RawOperationOutput, SourceSink
     },
-    orchestrator::{Configuration, Context},
+    orchestrator::{BuildGraph, Configuration, Context},
 };
 
-use petgraph::{dot::Dot, graph::Graph};
+use petgraph::dot::Dot;
 
 #[tokio::main]
 async fn main() {
     let job_limit = num_cpus::get();
 
-    let mut g = Graph::<Arc<Box<dyn Operation>>, String>::new();
+    let mut g = BuildGraph::new();
     let source: Box<dyn Operation> = Box::new(SourceSink::Source);
-    let glyphs2ufo: Box<dyn Operation> = Box::new(Glyphs2UFO::new());
-    let compile: Box<dyn Operation> = Box::new(BuildVariable::new());
+    let glyphs2ufo: Box<dyn Operation> = Box::new(Glyphs2UFO);
+    let compile: Box<dyn Operation> = Box::new(BuildVariable);
     let variable_ttf: Box<dyn Operation> = Box::new(SourceSink::Sink);
     let source_node = g.add_node(source.into());
 
@@ -34,34 +33,43 @@ async fn main() {
     let variable_ttf_node = g.add_node(variable_ttf.into());
 
     let g2u_node = g.add_node(glyphs2ufo.into());
-    g.add_edge(source_node, g2u_node, "Nunito.glyphs".to_string());
-    g.add_edge(source_node, compile_node, "Nunito.glyphs".to_string());
+    g.add_edge(source_node, g2u_node, RawOperationOutput::from("Nunito.glyphs").into());
+    g.add_edge(source_node, compile_node, RawOperationOutput::from("Nunito.glyphs").into());
     g.add_edge(
         compile_node,
         variable_ttf_node,
-        "../fonts/variable/Nunito[wght].ttf".to_string(),
+       RawOperationOutput::from( "../fonts/variable/Nunito[wght].ttf").into(),
     );
-    for instance in ([
+    for instance in [
+        "Black",
+        "BlackItalic",
         "Bold",
         "BoldItalic",
-        "Heavy",
-        "HeavyItalic",
+        "ExtraBold",
+        "ExtraBoldItalic",
         "ExtraLight",
         "ExtraLightItalic",
-    ]) {
-        let build_instance: Box<dyn Operation> = Box::new(BuildStatic::new());
+        "Italic",
+        "Light",
+        "LightItalic",
+        "Medium",
+        "MediumItalic",
+        "SemiBold",
+        "SemiBoldItalic",
+    ] {
+        let build_instance: Box<dyn Operation> = Box::new(BuildStatic);
         let instance_ttf: Box<dyn Operation> = Box::new(SourceSink::Sink);
         let instance_node = g.add_node(build_instance.into());
         let instance_ttf_node = g.add_node(instance_ttf.into());
         g.add_edge(
             g2u_node,
             instance_node,
-            format!("instance_ufo/Nunito-{instance}.ufo"),
+            RawOperationOutput::from(format!("instance_ufo/Nunito-{instance}.ufo").as_str()).into(),
         );
         g.add_edge(
             instance_node,
             instance_ttf_node,
-            format!("../fonts/ttf/Nunito-{instance}.ttf"),
+            RawOperationOutput::from(format!("../fonts/ttf/Nunito-{instance}.ttf").as_str()).into(),
         );
     }
 

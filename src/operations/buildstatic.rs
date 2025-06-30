@@ -1,19 +1,9 @@
 use crate::{
     error::ApplicationError,
-    operations::{JobContext, Operation, Output},
+    operations::{Operation, OperationOutput, Output},
 };
 
-pub(crate) struct BuildStatic {
-    _jobcontext: JobContext,
-}
-
-impl BuildStatic {
-    pub fn new() -> Self {
-        Self {
-            _jobcontext: JobContext::new(),
-        }
-    }
-}
+pub(crate) struct BuildStatic;
 
 impl Operation for BuildStatic {
     fn shortname(&self) -> &str {
@@ -22,10 +12,14 @@ impl Operation for BuildStatic {
     // fn jobcontext(&self) -> &JobContext {
     //     &self._jobcontext
     // }
-    fn execute(&self, inputs: &[String], outputs: &[String]) -> Result<Output, ApplicationError> {
+    fn execute(
+        &self,
+        inputs: &[OperationOutput],
+        outputs: &[OperationOutput],
+    ) -> Result<Output, ApplicationError> {
         let cmd = format!(
             "fontmake -o ttf -u {} --filter ... --filter FlattenComponentsFilter --filter DecomposeTransformedComponentsFilter --output-path {}",
-            inputs[0], outputs[0]
+            inputs[0].lock()?.to_filename(), outputs[0].lock()?.to_filename()
         );
         self.run_shell_command(&cmd, outputs)
     }
