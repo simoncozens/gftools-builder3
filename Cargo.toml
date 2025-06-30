@@ -1,15 +1,15 @@
 [package]
-name = "turtle-build"
-description = "Ninja-compatible build system for high-level programming languages"
-authors = ["Yota Toyama <raviqqe@gmail.com>"]
-repository = "https://github.com/raviqqe/turtle"
-version = "0.4.8"
+name = "gftools-builder"
+description = "A tool to build and fix fonts for Google Fonts"
+authors = ["Simon Cozens <simon@simon-cozens.org>"]
+repository = "https://github.com/simoncozens/gftools-builder3"
+version = "3.0.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 publish = true
 
 [[bin]]
-name = "turtle"
+name = "gftools-builder"
 path = "src/main.rs"
 
 [dependencies]
