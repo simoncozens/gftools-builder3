@@ -15,7 +15,6 @@ use crate::{
         fontc::Fontc, fix::Fix, glyphs2ufo::Glyphs2UFO, SourceSink
     },
     graph::BuildGraph,
-    orchestrator::{Configuration, Context},
 };
 
 #[tokio::main]
@@ -53,10 +52,7 @@ async fn main() {
     println!("{}", g.draw());
 
 
-    let configuration = Configuration::new(g);
-
-    let context = Arc::new(Context::new(job_limit, Arc::new(configuration)));
-    if let Err(error) = orchestrator::run(&context).await {
+    if let Err(error) = orchestrator::run(g, job_limit).await {
         stderr()
             .write_all(format!("{error}\n").as_bytes())
             .await

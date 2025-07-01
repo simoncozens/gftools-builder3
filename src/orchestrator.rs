@@ -38,7 +38,9 @@ impl Configuration {
 type RawBuildFuture = Pin<Box<dyn Future<Output = Result<(), ApplicationError>> + Send>>;
 pub(crate) type BuildFuture = Shared<RawBuildFuture>;
 
-pub async fn run(context: &Arc<Context>) -> Result<(), ApplicationError> {
+pub async fn run(graph: BuildGraph, job_limit: usize) -> Result<(), ApplicationError> {
+    let configuration = Configuration::new(graph);
+    let context = Arc::new(Context::new(job_limit, Arc::new(configuration)));
     // Work out the final targets.
     let final_targets: HashSet<NodeIndex> =
         HashSet::from_iter(context.configuration.graph().externals(Direction::Outgoing));

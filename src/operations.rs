@@ -11,6 +11,27 @@ use std::{
 };
 use tempfile::NamedTempFile;
 
+/// An output from an operation
+///
+/// gftools-builder is essentially a build system like `make` or `ninja`. In these kinds of build systems,
+/// the fundamental unit of operation is a process, and processes communicate their outputs via file names.
+/// In some cases, the file names aren't important; they are just a way to pass data around between processes.
+/// So you could imagine a hypothetical extension to Makefile which does something like:
+///
+/// ```makefile
+/// <temporary file 1>: Foo.glyphs
+///     fontc $< -o $@
+/// Foo.ttf: <temporary file 1>
+///     gftools fix $< -o $@
+/// ```
+///
+/// We're saying "we don't care what the file is called; when you need a name for the purposes of the process,
+/// come up with a temporary file name and use it". Now let's go even further. In gftools-builder, the fundamental
+/// unit of operation is a Rust thread running a function. If we're just passing data from thread thread, we don't
+/// even need our data to hit the disk at all. We can just pass around `Vec<u8>`s in memory between our operations.
+/// (The data is stored in the operations graph as edges between the operations.)
+/// Some operations, however, do call external processes and need to write and read files, so we need to be able to
+/// convert between `Vec<u8>`s and file names.
 #[derive(Debug)]
 pub enum RawOperationOutput {
     NamedFile(String),
@@ -80,7 +101,7 @@ impl std::fmt::Debug for OperationOutput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let raw_output = self.lock().map_err(|_| std::fmt::Error)?;
         match &*raw_output {
-            RawOperationOutput::NamedFile(name) => write!(f, "NamedFile({})", name),
+            RawOperationOutput::NamedFile(name) => write!(f, "NamedFile({name})"),
             RawOperationOutput::TemporaryFile(None) => write!(f, "UnnamedTemporaryFile"),
             RawOperationOutput::TemporaryFile(Some(x)) => {
                 write!(f, "NamedTemporaryFile({})", x.path().to_string_lossy())
@@ -149,12 +170,11 @@ pub trait Operation: Send + Sync {
     ) -> Result<Output, ApplicationError>;
     fn description(&self) -> String;
     fn shortname(&self) -> &str;
-    // fn jobcontext(&self) -> &JobContext;
 
     fn run_shell_command(
         &self,
         cmd: &str,
-        outputs: &[OperationOutput],
+        _outputs: &[OperationOutput],
     ) -> Result<Output, ApplicationError> {
         let output = std::process::Command::new("sh")
             .arg("-c")
@@ -162,9 +182,6 @@ pub trait Operation: Send + Sync {
             .output()
             .map_err(|e| ApplicationError::Other(e.to_string()))?;
         Ok(output)
-        // self.jobcontext().update_from_output(output)?;
-        // self.jobcontext().update_from_files_on_disk(outputs)?;
-        // self.jobcontext().output().clone()
     }
 }
 
