@@ -3,11 +3,11 @@
 //! This code was heavily, heavily adopted from aviqqe/turtle-build.
 //! Many thanks to Yota Toyama for making this code available under the MIT/Apache licenses.
 //! A parallel build system in just under 200 lines of Rust is astonishing.
-use crate::{error::ApplicationError, operations::{Operation, OperationOutput}};
+use crate::{error::ApplicationError, graph::{BuildGraph, BuildStep}, operations::OperationOutput};
 use async_recursion::async_recursion;
 use dashmap::DashMap;
 use futures::future::{FutureExt, Shared, try_join_all};
-use petgraph::{Direction, Graph, graph::NodeIndex, visit::EdgeRef};
+use petgraph::{Direction, graph::NodeIndex, visit::EdgeRef};
 use std::{
     collections::HashSet, error::Error, future::Future, pin::Pin, process::Output, sync::Arc,
 };
@@ -19,8 +19,6 @@ use tokio::{
     try_join,
 };
 
-
-pub type BuildGraph = Graph<BuildStep, OperationOutput>;
 
 // #[derive(Clone)]
 pub struct Configuration {
@@ -36,8 +34,6 @@ impl Configuration {
         &self.graph
     }
 }
-
-type BuildStep = Arc<Box<dyn Operation>>;
 
 type RawBuildFuture = Pin<Box<dyn Future<Output = Result<(), ApplicationError>> + Send>>;
 pub(crate) type BuildFuture = Shared<RawBuildFuture>;
@@ -151,7 +147,7 @@ async fn run_op(
             let console = context.console().lock().await;
             if !inputs.is_empty() && !outputs.is_empty() {
                 stderr()
-                    .write_all(format!("Finished {}\n", &description).as_bytes())
+                    .write_all(format!("{}\n", &description).as_bytes())
                     .await?;
             }
             // debug!(context, console, "command: {}", rule.command());

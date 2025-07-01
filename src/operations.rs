@@ -1,6 +1,5 @@
-pub mod buildstatic;
-pub mod buildvariable;
 pub mod fix;
+pub mod fontc;
 pub mod glyphs2ufo;
 
 use crate::error::ApplicationError;
@@ -17,6 +16,19 @@ pub enum RawOperationOutput {
     NamedFile(String),
     TemporaryFile(Option<NamedTempFile>),
     InMemoryBytes(Vec<u8>),
+}
+
+impl PartialEq for RawOperationOutput {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (RawOperationOutput::NamedFile(a), RawOperationOutput::NamedFile(b)) => a == b,
+            (RawOperationOutput::TemporaryFile(a), RawOperationOutput::TemporaryFile(b)) => {
+                a.as_ref().map(|f| f.path()) == b.as_ref().map(|f| f.path())
+            }
+            (RawOperationOutput::InMemoryBytes(a), RawOperationOutput::InMemoryBytes(b)) => a == b,
+            _ => false,
+        }
+    }
 }
 #[derive(Clone)]
 pub struct OperationOutput(Arc<Mutex<RawOperationOutput>>);
@@ -36,6 +48,15 @@ impl From<&str> for RawOperationOutput {
 impl From<RawOperationOutput> for OperationOutput {
     fn from(output: RawOperationOutput) -> Self {
         Self(Arc::new(Mutex::new(output)))
+    }
+}
+
+impl PartialEq for OperationOutput {
+    fn eq(&self, other: &Self) -> bool {
+        // unwraps here are horrible but this is only used during graph creation
+        let self_lock = self.lock().unwrap();
+        let other_lock = other.lock().unwrap();
+        *self_lock == *other_lock
     }
 }
 impl OperationOutput {
@@ -85,9 +106,36 @@ impl OperationOutput {
                     Ok(x.as_ref().unwrap().path().to_string_lossy().to_string())
                 }
             }
-            RawOperationOutput::InMemoryBytes(_) => {
-                panic!("Cannot convert InMemoryBytes to filename")
+            RawOperationOutput::InMemoryBytes(bytes) => {
+                // Convert in-memory bytes to a temp file by writing it
+                let temp_file =
+                    NamedTempFile::new().map_err(|e| ApplicationError::Other(e.to_string()))?;
+                // write
+                let temp_path = temp_file.path();
+                let temp_path_string = temp_path.to_string_lossy().to_string();
+                std::fs::write(temp_path, bytes)
+                    .map_err(|e| ApplicationError::Other(e.to_string()))?;
+                *f = RawOperationOutput::TemporaryFile(Some(temp_file));
+                Ok(temp_path_string)
             }
+        }
+    }
+    pub fn set_bytes(&self, bytes: Vec<u8>) -> Result<(), ApplicationError> {
+        let mut f = self.lock().map_err(|_| ApplicationError::MutexPoisoned)?;
+        *f = RawOperationOutput::InMemoryBytes(bytes);
+        Ok(())
+    }
+    pub fn is_named_file(&self) -> bool {
+        let f = self.lock().unwrap();
+        matches!(&*f, RawOperationOutput::NamedFile(_))
+    }
+    pub fn set_contents(&self, bytes: Vec<u8>) -> Result<(), ApplicationError> {
+        if self.is_named_file() {
+            // OK, we write it
+            let output_path = self.to_filename()?;
+            Ok(std::fs::write(output_path, bytes)?)
+        } else {
+            self.set_bytes(bytes)
         }
     }
 }
@@ -126,6 +174,12 @@ impl std::fmt::Debug for dyn Operation {
     }
 }
 
+impl std::fmt::Display for dyn Operation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.shortname())
+    }
+}
+
 pub(crate) enum SourceSink {
     Source,
     Sink,
@@ -133,8 +187,8 @@ pub(crate) enum SourceSink {
 impl Operation for SourceSink {
     fn execute(
         &self,
-        inputs: &[OperationOutput],
-        outputs: &[OperationOutput],
+        _inputs: &[OperationOutput],
+        _outputs: &[OperationOutput],
     ) -> Result<Output, ApplicationError> {
         Ok(Output {
             status: ExitStatus::from_raw(0),

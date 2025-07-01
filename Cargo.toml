@@ -16,6 +16,7 @@ path = "src/main.rs"
 async-recursion = "1"
 async-trait = "0.1.88"
 dashmap = "6.1.0"
+fontc = { git = "https://github.com/googlefonts/fontc", version = "0.2.0" }
 futures = "0.3"
 monostate = "0.1.14"
 num_cpus = "1"

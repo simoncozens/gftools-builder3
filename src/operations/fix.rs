@@ -3,11 +3,11 @@ use crate::{
     operations::{Operation, OperationOutput, Output},
 };
 
-pub(crate) struct BuildVariable;
+pub(crate) struct Fix;
 
-impl Operation for BuildVariable {
+impl Operation for Fix {
     fn shortname(&self) -> &str {
-        "BuildVariable"
+        "Fix"
     }
     fn execute(
         &self,
@@ -15,13 +15,14 @@ impl Operation for BuildVariable {
         outputs: &[OperationOutput],
     ) -> Result<Output, ApplicationError> {
         let cmd = format!(
-            "fontmake -o variable -g {} --filter ... --filter FlattenComponentsFilter --filter DecomposeTransformedComponentsFilter --output-path {}",
-            inputs[0].to_filename()?, outputs[0].to_filename()?
+            "gftools-fix-font {} -o {}",
+            inputs[0].to_filename()?,
+            outputs[0].to_filename()?
         );
         self.run_shell_command(&cmd, outputs)
     }
 
     fn description(&self) -> String {
-        "Build a variable font".to_string()
+        "Build a static font".to_string()
     }
 }
