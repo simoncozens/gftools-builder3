@@ -3,6 +3,7 @@ use crate::{
     operations::{Operation, OperationOutput, Output},
 };
 
+#[derive(PartialEq, Debug)]
 pub(crate) struct Fix;
 
 impl Operation for Fix {

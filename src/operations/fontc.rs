@@ -4,10 +4,11 @@ use crate::{
     error::ApplicationError,
     operations::{Operation, OperationOutput, Output},
 };
-use fontc::generate_font;
 use fontc::Flags;
+use fontc::generate_font;
 use tempfile::tempdir;
 
+#[derive(PartialEq, Debug)]
 pub(crate) struct Fontc;
 
 impl Operation for Fontc {

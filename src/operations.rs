@@ -4,6 +4,7 @@ pub mod glyphs2ufo;
 
 use crate::error::ApplicationError;
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use std::{
     os::unix::process::ExitStatusExt,
     process::{ExitStatus, Output},
@@ -225,6 +226,26 @@ impl Operation for SourceSink {
         match self {
             SourceSink::Source => "Source",
             SourceSink::Sink => "Sink",
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub(crate) enum OpStep {
+    #[serde(rename = "glyphs2ufo")]
+    Glyphs2UFO,
+    #[serde(rename = "fontc")]
+    Fontc,
+    #[serde(rename = "fix")]
+    Fix,
+}
+
+impl OpStep {
+    pub fn operation(&self) -> Box<dyn Operation> {
+        match self {
+            OpStep::Fix => Box::new(fix::Fix),
+            OpStep::Fontc => Box::new(fontc::Fontc),
+            OpStep::Glyphs2UFO => Box::new(glyphs2ufo::Glyphs2UFO),
         }
     }
 }

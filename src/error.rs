@@ -12,6 +12,8 @@ pub enum ApplicationError {
     WrongInputs(String),
     #[error("Outputs provided to operation are not correct: {0}")]
     WrongOutputs(String),
+    #[error("Recipe is not valid: {0}")]
+    InvalidRecipe(String),
     #[error("{0}")]
     Other(String),
     #[error("Mutex was poisoned")]

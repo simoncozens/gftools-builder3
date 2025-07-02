@@ -5,6 +5,7 @@ use crate::{
     operations::{Operation, OperationOutput},
 };
 
+#[derive(PartialEq, Debug)]
 pub(crate) struct Glyphs2UFO;
 
 impl Operation for Glyphs2UFO {

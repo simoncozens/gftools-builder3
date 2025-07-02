@@ -15,9 +15,13 @@ path = "src/main.rs"
 [dependencies]
 async-recursion = "1"
 async-trait = "0.1.88"
+clap = "4.5.40"
 dashmap = "6.1.0"
+env_logger = "0.11.8"
 fontc = { git = "https://github.com/googlefonts/fontc", version = "0.2.0" }
 futures = "0.3"
+layout-rs = "0.1.3"
+log = "0.4.27"
 monostate = "0.1.14"
 num_cpus = "1"
 petgraph = "0.8.2"

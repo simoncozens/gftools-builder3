@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
+use layout::backends::svg::SVGWriter;
+use layout::gv::{self, GraphBuilder};
 use petgraph::dot::Dot;
 use petgraph::{graph::NodeIndex, visit::EdgeRef, Graph};
 
-use crate::{
-    operations::{Operation, OperationOutput, RawOperationOutput},
-    SourceSink,
-};
+use crate::error::ApplicationError;
+use crate::operations::{Operation, OperationOutput, RawOperationOutput, SourceSink};
 
 pub type BuildStep = Arc<Box<dyn Operation>>;
 
@@ -44,16 +44,16 @@ impl BuildGraph {
         self.graph.edges_directed(index, direction)
     }
 
-    pub fn add_path(
+    pub fn add_path<S: AsRef<str>>(
         &mut self,
         source_filename: &str,
-        operations: Vec<(BuildStep, Option<&str>)>,
+        operations: Vec<(Option<S>, BuildStep)>,
         sink_filename: &str,
     ) {
         let mut current_node = self.source;
-        for (index, (op, intermediate_filename)) in operations.into_iter().enumerate() {
-            let output = if let Some(intermediate_filename) = intermediate_filename {
-                RawOperationOutput::from(intermediate_filename).into()
+        for (index, (input_filename, op)) in operations.into_iter().enumerate() {
+            let output = if let Some(input_filename) = input_filename {
+                RawOperationOutput::from(input_filename.as_ref()).into()
             } else if index == 0 {
                 RawOperationOutput::from(source_filename).into()
             } else {
@@ -83,7 +83,34 @@ impl BuildGraph {
             .update_edge(current_node, self.sink, final_output);
     }
 
-    pub fn draw(&self) -> String {
-        format!("{}", Dot::new(&self.graph))
+    pub fn ensure_directories(&self) -> Result<(), ApplicationError> {
+        for edge in self.graph.raw_edges() {
+            if edge.weight.is_named_file() {
+                if let Some(parent) = std::path::Path::new(&edge.weight.to_filename()?).parent() {
+                    std::fs::create_dir_all(parent).map_err(|e| {
+                        ApplicationError::Other(format!(
+                            "Could not create directory {}: {}",
+                            parent.display(),
+                            e
+                        ))
+                    })?;
+                }
+            }
+        }
+        Ok(())
+    }
+    pub fn draw(&self) -> Result<String, ApplicationError> {
+        let contents = format!("{}", Dot::new(&self.graph));
+        let mut parser = gv::DotParser::new(&contents);
+        let tree = parser
+            .process()
+            .map_err(|e| ApplicationError::Other(format!("Could not parse graph: {e}")))?;
+        let mut gb = GraphBuilder::new();
+        gb.visit_graph(&tree);
+        let mut vg = gb.get();
+        let mut svg = SVGWriter::new();
+        vg.do_it(false, false, false, &mut svg);
+        let svg_contents = svg.finalize();
+        Ok(svg_contents)
     }
 }

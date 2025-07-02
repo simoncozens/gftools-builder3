@@ -3,7 +3,11 @@
 //! This code was heavily, heavily adopted from aviqqe/turtle-build.
 //! Many thanks to Yota Toyama for making this code available under the MIT/Apache licenses.
 //! A parallel build system in just under 200 lines of Rust is astonishing.
-use crate::{error::ApplicationError, graph::{BuildGraph, BuildStep}, operations::OperationOutput};
+use crate::{
+    error::ApplicationError,
+    graph::{BuildGraph, BuildStep},
+    operations::OperationOutput,
+};
 use async_recursion::async_recursion;
 use dashmap::DashMap;
 use futures::future::{FutureExt, Shared, try_join_all};
@@ -18,7 +22,6 @@ use tokio::{
     time::Instant,
     try_join,
 };
-
 
 // #[derive(Clone)]
 pub struct Configuration {
@@ -128,16 +131,22 @@ async fn run_op(
     let description = format!(
         "{}: {} -> {}",
         op.shortname(),
-        inputs.iter().map(|x| format!("{x}")).collect::<Vec<_>>().join(", "),
-        outputs.iter().map(|x| format!("{x}")).collect::<Vec<_>>().join(", ")
+        inputs
+            .iter()
+            .map(|x| format!("{x}"))
+            .collect::<Vec<_>>()
+            .join(", "),
+        outputs
+            .iter()
+            .map(|x| format!("{x}"))
+            .collect::<Vec<_>>()
+            .join(", ")
     );
     let ((output, _duration), _console) = try_join!(
         async {
             let start_time = Instant::now();
             if !inputs.is_empty() && !outputs.is_empty() {
-                stderr()
-                    .write_all(format!("Running {}\n", &description).as_bytes())
-                    .await?;
+                log::info!("Starting {}", &description);
             }
             let output = context
                 .run_with_semaphore(|| op.execute(inputs, outputs))
