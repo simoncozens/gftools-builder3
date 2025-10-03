@@ -1,3 +1,4 @@
+pub mod buildstat;
 pub mod fix;
 pub mod fontc;
 pub mod glyphs2ufo;
@@ -151,6 +152,27 @@ impl OperationOutput {
         let f = self.lock().unwrap();
         matches!(&*f, RawOperationOutput::NamedFile(_))
     }
+    pub fn to_bytes(&self) -> Result<Vec<u8>, ApplicationError> {
+        let f = self.lock().map_err(|_| ApplicationError::MutexPoisoned)?;
+        match &*f {
+            RawOperationOutput::NamedFile(name) => {
+                // Read the file contents
+                let bytes =
+                    std::fs::read(name).map_err(|e| ApplicationError::Other(e.to_string()))?;
+                Ok(bytes)
+            }
+            RawOperationOutput::TemporaryFile(Some(temp_file)) => {
+                // Read the temp file contents
+                let bytes = std::fs::read(temp_file.path())
+                    .map_err(|e| ApplicationError::Other(e.to_string()))?;
+                Ok(bytes)
+            }
+            RawOperationOutput::TemporaryFile(None) => Err(ApplicationError::Other(
+                "Temporary file is not set".to_string(),
+            )),
+            RawOperationOutput::InMemoryBytes(bytes) => Ok(bytes.clone()),
+        }
+    }
     pub fn set_contents(&self, bytes: Vec<u8>) -> Result<(), ApplicationError> {
         if self.is_named_file() {
             // OK, we write it
@@ -238,6 +260,8 @@ pub(crate) enum OpStep {
     Fontc,
     #[serde(rename = "fix")]
     Fix,
+    #[serde(rename = "buildStat")]
+    BuildStat,
 }
 
 impl OpStep {
@@ -246,6 +270,7 @@ impl OpStep {
             OpStep::Fix => Box::new(fix::Fix),
             OpStep::Fontc => Box::new(fontc::Fontc),
             OpStep::Glyphs2UFO => Box::new(glyphs2ufo::Glyphs2UFO),
+            OpStep::BuildStat => Box::new(buildstat::BuildStat),
         }
     }
 }

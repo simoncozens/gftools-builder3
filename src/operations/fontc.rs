@@ -4,8 +4,8 @@ use crate::{
     error::ApplicationError,
     operations::{Operation, OperationOutput, Output},
 };
-use fontc::Flags;
 use fontc::generate_font;
+use fontc::Flags;
 use tempfile::tempdir;
 
 #[derive(PartialEq, Debug)]

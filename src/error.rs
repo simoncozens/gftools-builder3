@@ -18,6 +18,8 @@ pub enum ApplicationError {
     Other(String),
     #[error("Mutex was poisoned")]
     MutexPoisoned,
+    #[error("Font read error: {0}")]
+    FontReadError(String),
 }
 
 impl From<Box<dyn Error>> for ApplicationError {
@@ -41,5 +43,11 @@ impl From<JoinError> for ApplicationError {
 impl<T> From<PoisonError<T>> for ApplicationError {
     fn from(_: PoisonError<T>) -> Self {
         Self::MutexPoisoned
+    }
+}
+
+impl From<fontations::read::ReadError> for ApplicationError {
+    fn from(error: fontations::read::ReadError) -> Self {
+        Self::FontReadError(error.to_string())
     }
 }

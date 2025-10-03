@@ -38,12 +38,12 @@ async fn main() {
         .format_module_path(false)
         .format_target(false)
         .init();
-    let config_yaml = std::fs::read_to_string(&args.config_file).unwrap_or_else(|_| {
-        log::error!("Could not read config file: {}", args.config_file);
+    let config_yaml = std::fs::read_to_string(&args.config_file).unwrap_or_else(|e| {
+        log::error!("Could not read config file {}: {e}", args.config_file);
         exit(1)
     });
-    let mut config = serde_yaml_ng::from_str::<recipe::Config>(&config_yaml).unwrap_or_else(|_| {
-        log::error!("Could not parse config file: {}", args.config_file);
+    let mut config = serde_yaml_ng::from_str::<recipe::Config>(&config_yaml).unwrap_or_else(|e| {
+        log::error!("Could not parse config file {}: {e}", args.config_file);
         exit(1)
     });
     let g = config
