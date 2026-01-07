@@ -16,6 +16,22 @@ enum Style {
     Italic,
 }
 
+#[derive(PartialEq, Debug, Clone, Copy)]
+enum FontFormat {
+    TTF,
+    OTF,
+    WOFF2,
+}
+impl FontFormat {
+    fn extension(&self) -> &'static str {
+        match self {
+            FontFormat::TTF => "ttf",
+            FontFormat::OTF => "otf",
+            FontFormat::WOFF2 => "woff2",
+        }
+    }
+}
+
 pub type ItalicDescriptor = (String, UserCoord, UserCoord);
 
 #[serde_inline_default]
@@ -93,17 +109,16 @@ impl GoogleFontsOptions {
         self.woff_dir.replace("$outputDir", &self.output_dir)
     }
 
-    pub fn vf_filename(
+    fn vf_filename(
         &self,
         source: &Font,
         suffix: Option<&str>,
-        extension: Option<&str>,
+        format: FontFormat,
         italic_ds: Option<&ItalicDescriptor>,
         roman: Style,
     ) -> Result<String, ApplicationError> {
         let suffix = suffix.unwrap_or("");
-        let extension = extension.unwrap_or("ttf");
-
+        let extension = format.extension();
         let mut sourcebase = source
             .source
             .as_ref()
@@ -263,7 +278,7 @@ impl GoogleFontsProvider {
         let target = self.options.vf_filename(
             source,
             self.options.filename_suffix.as_deref(),
-            Some("ttf"),
+            FontFormat::TTF,
             italic_ds,
             roman,
         )?;
@@ -288,7 +303,7 @@ impl GoogleFontsProvider {
             let webfont_target = self.options.vf_filename(
                 source,
                 self.options.filename_suffix.as_deref(),
-                Some("woff2"),
+                FontFormat::WOFF2,
                 italic_ds,
                 roman,
             )?;

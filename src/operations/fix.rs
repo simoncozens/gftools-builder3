@@ -5,7 +5,14 @@ use crate::{
 use std::{os::unix::process::ExitStatusExt as _, process::Output};
 
 #[derive(PartialEq, Debug)]
-pub(crate) struct Fix;
+pub(crate) struct Fix {
+    args: Option<String>,
+}
+impl Fix {
+    pub fn new() -> Self {
+        Fix { args: None }
+    }
+}
 
 impl Operation for Fix {
     fn shortname(&self) -> &str {
@@ -36,5 +43,13 @@ impl Operation for Fix {
 
     fn description(&self) -> String {
         "Apply gftools-fix-font".to_string()
+    }
+
+    fn set_args(&mut self, args: Option<String>) {
+        self.args = args;
+    }
+
+    fn identifier(&self) -> String {
+        format!("Fix-{}", self.args.as_deref().unwrap_or(""))
     }
 }

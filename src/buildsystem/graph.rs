@@ -63,8 +63,7 @@ impl BuildGraph {
                 .edges_directed(current_node, petgraph::Direction::Outgoing)
                 .find(|edge| {
                     edge.weight() == &output
-                        && self.graph[edge.target()].shortname() == op.shortname()
-                    // XXX This assumes that the operation's shortname is unique. (No parameters, etc.)
+                        && self.graph[edge.target()] == op
                 })
                 .map(|edge| edge.target())
             {

@@ -96,11 +96,13 @@ impl Step {
         match self {
             Step::OperationStep {
                 operation,
-                args: _,
-                extra: _,
+                args,
+                extra,
                 input_file,
             } => {
-                let op = operation.operation();
+                let mut op = operation.operation();
+                op.set_extra(extra.clone());
+                op.set_args(args.clone());
                 // Here you can handle args and extra if needed
                 Ok((input_file.clone(), Arc::new(op)))
             }

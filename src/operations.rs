@@ -33,7 +33,7 @@ impl OpStep {
     /// Convert the OpStep enum variant to its corresponding Operation implementation
     pub fn operation(&self) -> Box<dyn Operation> {
         match self {
-            OpStep::Fix => Box::new(fix::Fix),
+            OpStep::Fix => Box::new(fix::Fix::new()),
             OpStep::Fontc => Box::new(fontc::Fontc),
             OpStep::Glyphs2UFO => Box::new(glyphs2ufo::Glyphs2UFO),
             OpStep::BuildStat => Box::new(buildstat::BuildStat),
