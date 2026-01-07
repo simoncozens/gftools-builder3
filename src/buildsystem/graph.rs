@@ -12,20 +12,19 @@ pub type BuildStep = Arc<Box<dyn Operation>>;
 pub struct BuildGraph {
     graph: Graph<Arc<Box<dyn Operation + 'static>>, OperationOutput>,
     pub source: NodeIndex,
-    pub sink: NodeIndex,
+    pub sinks: Vec<NodeIndex>,
 }
 
 impl BuildGraph {
     pub fn new() -> Self {
         let mut g = Graph::new();
         let source_node: Box<dyn Operation + 'static> = Box::new(SourceSink::Source);
-        let sink_node: Box<dyn Operation + 'static> = Box::new(SourceSink::Sink);
         let source = g.add_node(Arc::new(source_node));
-        let sink = g.add_node(Arc::new(sink_node));
+        let sinks = vec![];
         Self {
             graph: g,
             source,
-            sink,
+            sinks,
         }
     }
 
@@ -70,6 +69,17 @@ impl BuildGraph {
                 .map(|edge| edge.target())
             {
                 current_node = existing_node;
+                // If there's a sink node from this node, use that as the current instead.
+                if let Some(sink_node) = self
+                    .graph
+                    .edges_directed(current_node, petgraph::Direction::Outgoing)
+                    .find(|edge| {
+                        self.sinks.contains(&edge.target())
+                    })
+                    .map(|edge| edge.target())
+                {
+                    current_node = sink_node;
+                }
                 continue;
             }
             // Otherwise, we add a new node for this operation.
@@ -78,8 +88,13 @@ impl BuildGraph {
             current_node = next_node;
         }
         let final_output = RawOperationOutput::from(sink_filename).into();
+        // Create a sink node and add it to the list of sinks
+        let sink_node = self.graph.add_node(Arc::new(Box::new(
+            SourceSink::Sink,
+        )));
         self.graph
-            .update_edge(current_node, self.sink, final_output);
+            .update_edge(current_node, sink_node, final_output);
+        self.sinks.push(sink_node);
     }
 
     pub fn ensure_directories(&self) -> Result<(), ApplicationError> {
@@ -113,5 +128,39 @@ impl BuildGraph {
         vg.do_it(false, false, false, &mut svg);
         let svg_contents = svg.finalize();
         Ok(svg_contents)
+    }
+
+    pub fn ascii(&self) -> Result<String, ApplicationError> {
+        // In ascii_dag we can't put a label on an edge. To get around that,
+        // we create another petgraph where as well as the original nodes,
+        // each edge in self.graph becomes a node, and we add edges from
+        // the source node to the edge node, and from the edge node to the
+        // target node.
+        let mut graph: Graph<String, ()> = Graph::new();
+        // First let's copy what we need to know about the nodes
+        for index in self.graph.node_indices() {
+            let op = self.graph.node_weight(index).unwrap();
+            graph.add_node(op.shortname().to_string());
+        }
+        // Now let's add nodes for the edges
+        for edge in self.graph.raw_edges() {
+            let edge_node = graph.add_node(format!("{}", edge.weight));
+            graph.add_edge(edge.source(), edge_node, ());
+            graph.add_edge(edge_node, edge.target(), ());
+        }
+
+        // And now we can create the nodes and edges for ascii_dag.
+        let nodes: Vec<(usize, &str)> = graph
+            .node_indices()
+            .map(|index| (index.index(), graph[index].as_str()))
+            .collect();
+        let edges: Vec<(usize, usize)> = graph
+            .raw_edges()
+            .iter()
+            .map(|edge| (edge.source().index(), edge.target().index()))
+            .collect();
+        let dag = ascii_dag::DAG::from_edges(&nodes, &edges);
+        let contents = dag.render();
+        Ok(contents)
     }
 }

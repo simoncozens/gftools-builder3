@@ -3,7 +3,7 @@ use std::{
     process::{ExitStatus, Output},
 };
 
-use ttf2woff2::{encode, BrotliQuality};
+use ttf2woff2::{BrotliQuality, encode};
 
 use crate::{
     buildsystem::{Operation, OperationOutput},

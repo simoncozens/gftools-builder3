@@ -41,6 +41,7 @@ serde-inline-default = "1.0.0"
 babelfont = { git = "https://github.com/simoncozens/babelfont-rs", version = "0.2.0-pre" }
 fontdrasil = "0.4.0"
 ttf2woff2 = { version = "0.10.3", default-features = false }
+ascii-dag = "0.4.0"
 
 [dev-dependencies]
 pretty_assertions = "1"

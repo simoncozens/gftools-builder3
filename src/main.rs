@@ -24,6 +24,8 @@ struct Args {
     /// This will create a file named `graph.svg` in the current directory
     #[clap(long)]
     graph: bool,
+    #[clap(long)]
+    ascii_graph: bool,
     config_file: String,
 }
 
@@ -68,12 +70,14 @@ async fn main() {
     }
 
     if args.generate {
-        let recipe = config
-            .recipe()
-            .unwrap_or_else(|e| panic!("Could not convert config {} to recipe: {}", args.config_file, e));
-        let recipe_yaml = serde_yaml_ng::to_string(&recipe).unwrap_or_else(|_| {
-            panic!("Could not serialize recipe to YAML: {}", args.config_file)
+        let recipe = config.recipe().unwrap_or_else(|e| {
+            panic!(
+                "Could not convert config {} to recipe: {}",
+                args.config_file, e
+            )
         });
+        let recipe_yaml = serde_yaml_ng::to_string(&recipe)
+            .unwrap_or_else(|_| panic!("Could not serialize recipe to YAML: {}", args.config_file));
         println!("{recipe_yaml}");
         return;
     }
@@ -81,10 +85,11 @@ async fn main() {
     let g = config
         .to_graph()
         .unwrap_or_else(|_| panic!("Could not convert config to graph: {}", args.config_file));
-    g.ensure_directories().unwrap_or_else(|_| {
+    g.ensure_directories().unwrap_or_else(|e| {
         log::error!(
-            "Could not ensure directories for graph: {}",
-            args.config_file
+            "Could not ensure directories for graph: {}: {}",
+            args.config_file,
+            e
         );
         exit(1)
     });
@@ -96,6 +101,14 @@ async fn main() {
             .unwrap_or_else(|_| panic!("Could not draw graph: {}", args.config_file));
         std::fs::write("graph.svg", graph)
             .unwrap_or_else(|_| panic!("Could not write graph to file: graph.svg"));
+    }
+
+    if args.ascii_graph {
+        let graph = g
+            .ascii()
+            .unwrap_or_else(|_| panic!("Could not create ASCII graph: {}", args.config_file));
+        println!("{graph}");
+        return;
     }
 
     if let Err(error) = buildsystem::run(g, job_limit).await {

@@ -29,7 +29,7 @@ pub struct GoogleFontsOptions {
     pub extra: HashMap<String, Value>,
 
     // Path-related options
-    #[serde_inline_default("../fonts/".to_string())]
+    #[serde_inline_default(".".to_string())]
     #[serde(rename = "outputDir")]
     pub output_dir: String,
 
