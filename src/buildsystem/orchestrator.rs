@@ -4,9 +4,8 @@
 //! Many thanks to Yota Toyama for making this code available under the MIT/Apache licenses.
 //! A parallel build system in just under 200 lines of Rust is astonishing.
 use crate::{
+    buildsystem::{BuildGraph, BuildStep, OperationOutput},
     error::ApplicationError,
-    graph::{BuildGraph, BuildStep},
-    operations::OperationOutput,
 };
 use async_recursion::async_recursion;
 use dashmap::DashMap;
@@ -129,7 +128,7 @@ async fn run_op(
     outputs: &[OperationOutput],
 ) -> Result<(), ApplicationError> {
     let description = format!(
-        "{}: {} -> {}",
+        "{}: {} -> {} ({})",
         op.shortname(),
         inputs
             .iter()
@@ -140,7 +139,8 @@ async fn run_op(
             .iter()
             .map(|x| format!("{x}"))
             .collect::<Vec<_>>()
-            .join(", ")
+            .join(", "),
+        op.description()
     );
     let ((output, _duration), _console) = try_join!(
         async {

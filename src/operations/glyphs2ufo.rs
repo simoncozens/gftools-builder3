@@ -1,8 +1,8 @@
 use std::process::Output;
 
 use crate::{
+    buildsystem::{Operation, OperationOutput},
     error::ApplicationError,
-    operations::{Operation, OperationOutput},
 };
 
 #[derive(PartialEq, Debug)]

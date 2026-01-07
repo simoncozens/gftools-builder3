@@ -1,12 +1,11 @@
 use std::sync::Arc;
 
-use layout::backends::svg::SVGWriter;
-use layout::gv::{self, GraphBuilder};
-use petgraph::dot::Dot;
-use petgraph::{graph::NodeIndex, visit::EdgeRef, Graph};
+use petgraph::{Graph, graph::NodeIndex, visit::EdgeRef};
 
+use crate::buildsystem::{
+    Operation, OperationOutput, output::RawOperationOutput, sourcesink::SourceSink,
+};
 use crate::error::ApplicationError;
-use crate::operations::{Operation, OperationOutput, RawOperationOutput, SourceSink};
 
 pub type BuildStep = Arc<Box<dyn Operation>>;
 
@@ -37,10 +36,10 @@ impl BuildGraph {
         self.graph.node_weight(index)
     }
     pub fn edges_directed(
-        &self,
+        &'_ self,
         index: NodeIndex,
         direction: petgraph::Direction,
-    ) -> impl Iterator<Item = petgraph::graph::EdgeReference<OperationOutput>> {
+    ) -> impl Iterator<Item = petgraph::graph::EdgeReference<'_, OperationOutput>> {
         self.graph.edges_directed(index, direction)
     }
 
@@ -85,30 +84,32 @@ impl BuildGraph {
 
     pub fn ensure_directories(&self) -> Result<(), ApplicationError> {
         for edge in self.graph.raw_edges() {
-            if edge.weight.is_named_file() {
-                if let Some(parent) = std::path::Path::new(&edge.weight.to_filename()?).parent() {
-                    std::fs::create_dir_all(parent).map_err(|e| {
-                        ApplicationError::Other(format!(
-                            "Could not create directory {}: {}",
-                            parent.display(),
-                            e
-                        ))
-                    })?;
-                }
+            if edge.weight.is_named_file()
+                && let Some(parent) = std::path::Path::new(&edge.weight.to_filename()?).parent()
+            {
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    ApplicationError::Other(format!(
+                        "Could not create directory {}: {}",
+                        parent.display(),
+                        e
+                    ))
+                })?;
             }
         }
         Ok(())
     }
+
+    #[cfg(feature = "graphviz")]
     pub fn draw(&self) -> Result<String, ApplicationError> {
-        let contents = format!("{}", Dot::new(&self.graph));
-        let mut parser = gv::DotParser::new(&contents);
+        let contents = format!("{}", petgraph::dot::Dot::new(&self.graph));
+        let mut parser = layout::gv::DotParser::new(&contents);
         let tree = parser
             .process()
             .map_err(|e| ApplicationError::Other(format!("Could not parse graph: {e}")))?;
-        let mut gb = GraphBuilder::new();
+        let mut gb = layout::gv::GraphBuilder::new();
         gb.visit_graph(&tree);
         let mut vg = gb.get();
-        let mut svg = SVGWriter::new();
+        let mut svg = layout::backends::svg::SVGWriter::new();
         vg.do_it(false, false, false, &mut svg);
         let svg_contents = svg.finalize();
         Ok(svg_contents)

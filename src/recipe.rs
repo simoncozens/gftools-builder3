@@ -3,28 +3,20 @@ use serde_json::Value;
 use std::{collections::HashMap, sync::Arc};
 
 use crate::{
+    buildsystem::{BuildGraph, BuildStep},
     error::ApplicationError,
-    graph::{BuildGraph, BuildStep},
-    operations::{OpStep, Operation},
+    operations::OpStep,
+    recipe_providers::{
+        googlefonts::{GoogleFontsOptions, GoogleFontsProvider},
+        noto::{NotoFontsOptions, NotoProvider},
+    },
 };
 
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
-struct GoogleFontsOptions {
-    sources: Vec<String>,
-    #[serde(default)]
-    outputs: HashMap<String, String>,
-    #[serde(default)]
-    extra: HashMap<String, Value>,
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
-struct NotoFontsOptions {
-    sources: Vec<String>,
-    #[serde(default)]
-    outputs: HashMap<String, String>,
-    #[serde(default)]
-    extra: HashMap<String, Value>,
-}
+/// Enum representing different recipe providers as stored in the config file
+///
+/// This is used during recipe deserialization to handle different provider-specific options.
+/// We handle the case where the provider is explicitly tagged - either as "googlefonts" or "noto" -
+/// as well as the untagged case where we assume "googlefonts" by default.
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 #[serde(untagged)]
@@ -52,9 +44,37 @@ enum RecipeProvider {
     },
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
+pub(crate) trait Provider {
+    fn generate_recipe(self) -> Result<Recipe, ApplicationError>;
+}
+
+impl RecipeProvider {
+    pub fn generate_recipe(&self) -> Result<Recipe, ApplicationError> {
+        match self {
+            RecipeProvider::TaggedGoogleFonts { options, .. } => {
+                let provider = GoogleFontsProvider::new(options.clone());
+                provider.generate_recipe()
+            }
+            RecipeProvider::UntaggedGoogleFonts { options } => {
+                let provider = GoogleFontsProvider::new(options.clone());
+                provider.generate_recipe()
+            }
+            RecipeProvider::Noto { options, .. } => {
+                let provider = NotoProvider::new(options.clone());
+                provider.generate_recipe()
+            }
+            RecipeProvider::Other {
+                recipe_provider, ..
+            } => Err(ApplicationError::InvalidRecipe(format!(
+                "Unknown recipe provider: {recipe_provider}"
+            ))),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 #[serde(untagged)]
-enum Step {
+pub(crate) enum Step {
     OperationStep {
         operation: OpStep,
         #[serde(default)]
@@ -94,24 +114,68 @@ impl Step {
     }
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
-struct ConfigOperation(Vec<Step>);
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+pub struct ConfigOperation(pub(crate) Vec<Step>);
 
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
+pub type Recipe = HashMap<String, ConfigOperation>;
+
+#[derive(Serialize, PartialEq, Debug)]
 pub(crate) struct Config {
     #[serde(default)]
-    recipe: HashMap<String, ConfigOperation>,
+    recipe: Recipe,
     #[serde(flatten)]
     recipe_provider: Option<RecipeProvider>,
 }
 
-impl Config {
-    pub(crate) fn to_graph(&mut self) -> Result<BuildGraph, ApplicationError> {
-        let mut graph = BuildGraph::new();
-        if let Some(_provider) = &self.recipe_provider {
-            // provider.rewrite_recipe(&mut self)?;
+// We need to deserialize manually because: If there is a recipe but no recipe provider,
+// the recipe provider is None. But if there is no recipe and no recipe provider, we want to
+// default to googlefonts.
+impl<'de> Deserialize<'de> for Config {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct ConfigHelper {
+            #[serde(default)]
+            recipe: Recipe,
+            #[serde(flatten)]
+            recipe_provider: Option<RecipeProvider>,
         }
-        for (target, operation) in &self.recipe {
+
+        let helper = ConfigHelper::deserialize(deserializer)?;
+        let nullify_provider = !helper.recipe.is_empty()
+            && matches!(
+                helper.recipe_provider,
+                Some(RecipeProvider::UntaggedGoogleFonts { .. })
+            );
+        Ok(Config {
+            recipe: helper.recipe,
+            recipe_provider: if nullify_provider {
+                None
+            } else {
+                helper.recipe_provider
+            },
+        })
+    }
+}
+
+impl Config {
+    pub(crate) fn recipe(&self) -> Result<Recipe, ApplicationError> {
+        let mut recipe = if let Some(provider) = &self.recipe_provider {
+            provider.generate_recipe()?
+        } else {
+            Recipe::new()
+        };
+        // If the user provided a recipe in the config, overlay it on top.
+        recipe.extend(self.recipe.clone());
+        Ok(recipe)
+    }
+
+    pub(crate) fn to_graph(&self) -> Result<BuildGraph, ApplicationError> {
+        let mut graph = BuildGraph::new();
+        let recipe = self.recipe()?;
+        for (target, operation) in recipe {
             // First operation must be a source step
             let source = operation.0.first().ok_or_else(|| {
                 ApplicationError::InvalidRecipe(format!("No steps found for target '{target}'"))
@@ -129,7 +193,7 @@ impl Config {
                 .skip(1)
                 .map(|step| step.to_operation())
                 .collect::<Result<Vec<_>, ApplicationError>>()?;
-            graph.add_path(source_filename, operations, target);
+            graph.add_path(source_filename, operations, &target);
         }
         Ok(graph)
     }
@@ -153,9 +217,8 @@ sources:
                 recipe: HashMap::new(),
                 recipe_provider: Some(RecipeProvider::UntaggedGoogleFonts {
                     options: GoogleFontsOptions {
-                        outputs: HashMap::new(),
-                        extra: HashMap::new(),
-                        sources: vec!["Nunito.glyphs".to_string()]
+                        sources: vec!["Nunito.glyphs".to_string()],
+                        ..Default::default()
                     }
                 })
             }
@@ -178,9 +241,8 @@ sources:
                 recipe_provider: Some(RecipeProvider::TaggedGoogleFonts {
                     _recipe_provider: monostate::MustBe!("googlefonts"),
                     options: GoogleFontsOptions {
-                        outputs: HashMap::new(),
-                        extra: HashMap::new(),
-                        sources: vec!["Nunito.glyphs".to_string()]
+                        sources: vec!["Nunito.glyphs".to_string()],
+                        ..Default::default()
                     }
                 })
             }

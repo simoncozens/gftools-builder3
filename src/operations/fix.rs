@@ -1,7 +1,8 @@
 use crate::{
+    buildsystem::{Operation, OperationOutput},
     error::ApplicationError,
-    operations::{Operation, OperationOutput, Output},
 };
+use std::{os::unix::process::ExitStatusExt as _, process::Output};
 
 #[derive(PartialEq, Debug)]
 pub(crate) struct Fix;
@@ -20,10 +21,20 @@ impl Operation for Fix {
             inputs[0].to_filename()?,
             outputs[0].to_filename()?
         );
-        self.run_shell_command(&cmd, outputs)
+        self.run_shell_command(&cmd, outputs)?;
+        // All outputs now need to have the same contents as the first output
+        for output in &outputs[1..] {
+            let contents = inputs[0].to_bytes()?;
+            output.set_contents(contents)?;
+        }
+        Ok(Output {
+            status: std::process::ExitStatus::from_raw(0),
+            stdout: vec![],
+            stderr: vec![],
+        })
     }
 
     fn description(&self) -> String {
-        "Build a static font".to_string()
+        "Apply gftools-fix-font".to_string()
     }
 }

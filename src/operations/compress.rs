@@ -1,0 +1,42 @@
+use std::{
+    os::unix::process::ExitStatusExt,
+    process::{ExitStatus, Output},
+};
+
+use ttf2woff2::{encode, BrotliQuality};
+
+use crate::{
+    buildsystem::{Operation, OperationOutput},
+    error::ApplicationError,
+};
+
+#[derive(PartialEq, Debug)]
+pub(crate) struct Compress;
+
+impl Operation for Compress {
+    fn shortname(&self) -> &str {
+        "Compress"
+    }
+    fn execute(
+        &self,
+        inputs: &[OperationOutput],
+        outputs: &[OperationOutput],
+    ) -> Result<Output, ApplicationError> {
+        let input_file = inputs
+            .first()
+            .ok_or_else(|| ApplicationError::WrongInputs("No input file provided".to_string()))?;
+        let ttf_data = input_file.to_bytes()?;
+
+        let compressed = encode(&ttf_data, BrotliQuality::default())?;
+        outputs[0].set_contents(compressed)?;
+        Ok(Output {
+            status: ExitStatus::from_raw(0),
+            stdout: vec![],
+            stderr: vec![],
+        })
+    }
+
+    fn description(&self) -> String {
+        "Convert to woff2".to_string()
+    }
+}

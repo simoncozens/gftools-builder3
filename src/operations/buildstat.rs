@@ -1,8 +1,8 @@
-use std::os::unix::process::ExitStatusExt;
+use std::{os::unix::process::ExitStatusExt, process::Output};
 
 use crate::{
+    buildsystem::{Operation, OperationOutput},
     error::ApplicationError,
-    operations::{Operation, OperationOutput, Output},
 };
 use fontations::read::FontRef;
 use google_fonts_axisregistry::build_stat;

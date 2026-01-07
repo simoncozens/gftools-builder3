@@ -1,8 +1,8 @@
+mod buildsystem;
 mod error;
-mod graph;
 mod operations;
-mod orchestrator;
 mod recipe;
+mod recipe_providers;
 
 use clap::{ArgAction, Parser};
 use std::{process::exit, time::Duration};
@@ -13,9 +13,13 @@ use tokio::{
 
 #[derive(clap::Parser)]
 struct Args {
-        /// Increase logging
+    /// Increase logging
     #[clap(short, long, action = ArgAction::Count, help_heading = "Logging")]
     pub verbose: u8,
+    /// Generate the recipe and dump as YAML but do not build
+    #[clap(long)]
+    pub generate: bool,
+    #[cfg(feature = "graphviz")]
     /// Draw the graph of the build process
     /// This will create a file named `graph.svg` in the current directory
     #[clap(long)]
@@ -29,11 +33,14 @@ async fn main() {
     let args = Args::parse();
     env_logger::Builder::new()
         .filter_level(log::LevelFilter::Error)
-        .filter_module("gftools_builder::orchestrator", match args.verbose {
-            0 => log::LevelFilter::Warn,
-            1 => log::LevelFilter::Info,
-            _ => log::LevelFilter::Debug,
-        })
+        .filter_module(
+            "gftools_builder::buildsystem",
+            match args.verbose {
+                0 => log::LevelFilter::Warn,
+                1 => log::LevelFilter::Info,
+                _ => log::LevelFilter::Debug,
+            },
+        )
         .format_timestamp(Some(env_logger::TimestampPrecision::Seconds))
         .format_module_path(false)
         .format_target(false)
@@ -42,10 +49,35 @@ async fn main() {
         log::error!("Could not read config file {}: {e}", args.config_file);
         exit(1)
     });
-    let mut config = serde_yaml_ng::from_str::<recipe::Config>(&config_yaml).unwrap_or_else(|e| {
+    // Parse the YAML into a recipe config file
+    let config = serde_yaml_ng::from_str::<recipe::Config>(&config_yaml).unwrap_or_else(|e| {
         log::error!("Could not parse config file {}: {e}", args.config_file);
         exit(1)
     });
+
+    // Change to the config file's directory
+    if let Some(config_dir) = std::path::Path::new(&args.config_file).parent() {
+        std::env::set_current_dir(config_dir).unwrap_or_else(|e| {
+            log::error!(
+                "Could not change directory to config file's directory {}: {}",
+                config_dir.display(),
+                e
+            );
+            exit(1)
+        });
+    }
+
+    if args.generate {
+        let recipe = config
+            .recipe()
+            .unwrap_or_else(|e| panic!("Could not convert config {} to recipe: {}", args.config_file, e));
+        let recipe_yaml = serde_yaml_ng::to_string(&recipe).unwrap_or_else(|_| {
+            panic!("Could not serialize recipe to YAML: {}", args.config_file)
+        });
+        println!("{recipe_yaml}");
+        return;
+    }
+    // Use the recipe to create a build graph
     let g = config
         .to_graph()
         .unwrap_or_else(|_| panic!("Could not convert config to graph: {}", args.config_file));
@@ -57,6 +89,7 @@ async fn main() {
         exit(1)
     });
 
+    #[cfg(feature = "graphviz")]
     if args.graph {
         let graph = g
             .draw()
@@ -65,7 +98,7 @@ async fn main() {
             .unwrap_or_else(|_| panic!("Could not write graph to file: graph.svg"));
     }
 
-    if let Err(error) = orchestrator::run(g, job_limit).await {
+    if let Err(error) = buildsystem::run(g, job_limit).await {
         stderr()
             .write_all(format!("{error}\n").as_bytes())
             .await

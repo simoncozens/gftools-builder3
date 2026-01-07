@@ -2,6 +2,8 @@ use std::{error::Error, sync::PoisonError};
 use thiserror::Error;
 use tokio::{io, task::JoinError};
 
+// We can't use thiserror `[from]` on these because they need to be Clone/Eq/PartialEq
+// to be used in the build system, so we have a bunch of sad manual impls below.
 #[derive(Clone, Debug, Eq, PartialEq, Error)]
 pub enum ApplicationError {
     #[error("build failed")]
@@ -20,6 +22,8 @@ pub enum ApplicationError {
     MutexPoisoned,
     #[error("Font read error: {0}")]
     FontReadError(String),
+    #[error("Webfont compression error: {0}")]
+    CompressionError(String),
 }
 
 impl From<Box<dyn Error>> for ApplicationError {
@@ -49,5 +53,11 @@ impl<T> From<PoisonError<T>> for ApplicationError {
 impl From<fontations::read::ReadError> for ApplicationError {
     fn from(error: fontations::read::ReadError) -> Self {
         Self::FontReadError(error.to_string())
+    }
+}
+
+impl From<ttf2woff2::Error> for ApplicationError {
+    fn from(error: ttf2woff2::Error) -> Self {
+        Self::CompressionError(error.to_string())
     }
 }

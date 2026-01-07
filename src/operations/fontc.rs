@@ -1,12 +1,11 @@
+use std::process::Output;
 use std::{os::unix::process::ExitStatusExt, path::PathBuf, process::ExitStatus};
 
 use crate::{
+    buildsystem::{Operation, OperationOutput},
     error::ApplicationError,
-    operations::{Operation, OperationOutput, Output},
 };
 use fontc::generate_font;
-use fontc::Flags;
-use tempfile::tempdir;
 
 #[derive(PartialEq, Debug)]
 pub(crate) struct Fontc;
@@ -25,8 +24,10 @@ impl Operation for Fontc {
             .ok_or_else(|| ApplicationError::WrongInputs("No input file provided".to_string()))?
             .to_filename()?;
         let input = fontc::Input::new(&PathBuf::from(input_file))
+            .map_err(|e| ApplicationError::Other(e.to_string()))?
+            .create_source()
             .map_err(|e| ApplicationError::Other(e.to_string()))?;
-        let font = generate_font(&input, tempdir()?.path(), None, Flags::default(), false)
+        let font = generate_font(input, fontc::Options::default())
             .map_err(|e| ApplicationError::Other(e.to_string()))?;
         outputs[0].set_contents(font)?;
         Ok(Output {
