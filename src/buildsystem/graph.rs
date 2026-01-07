@@ -61,10 +61,7 @@ impl BuildGraph {
             if let Some(existing_node) = self
                 .graph
                 .edges_directed(current_node, petgraph::Direction::Outgoing)
-                .find(|edge| {
-                    edge.weight() == &output
-                        && self.graph[edge.target()] == op
-                })
+                .find(|edge| edge.weight() == &output && self.graph[edge.target()] == op)
                 .map(|edge| edge.target())
             {
                 current_node = existing_node;
@@ -72,9 +69,7 @@ impl BuildGraph {
                 if let Some(sink_node) = self
                     .graph
                     .edges_directed(current_node, petgraph::Direction::Outgoing)
-                    .find(|edge| {
-                        self.sinks.contains(&edge.target())
-                    })
+                    .find(|edge| self.sinks.contains(&edge.target()))
                     .map(|edge| edge.target())
                 {
                     current_node = sink_node;
@@ -88,9 +83,7 @@ impl BuildGraph {
         }
         let final_output = RawOperationOutput::from(sink_filename).into();
         // Create a sink node and add it to the list of sinks
-        let sink_node = self.graph.add_node(Arc::new(Box::new(
-            SourceSink::Sink,
-        )));
+        let sink_node = self.graph.add_node(Arc::new(Box::new(SourceSink::Sink)));
         self.graph
             .update_edge(current_node, sink_node, final_output);
         self.sinks.push(sink_node);

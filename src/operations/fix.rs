@@ -24,9 +24,10 @@ impl Operation for Fix {
         outputs: &[OperationOutput],
     ) -> Result<Output, ApplicationError> {
         let cmd = format!(
-            "gftools-fix-font {} -o {}",
+            "gftools-fix-font {} -o {} {}",
             inputs[0].to_filename()?,
-            outputs[0].to_filename()?
+            outputs[0].to_filename()?,
+            self.args.as_deref().unwrap_or("")
         );
         self.run_shell_command(&cmd, outputs)?;
         // All outputs now need to have the same contents as the first output

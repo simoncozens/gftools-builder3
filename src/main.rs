@@ -4,12 +4,15 @@ mod operations;
 mod recipe;
 mod recipe_providers;
 
+use tracing_subscriber::{prelude::*, registry::Registry};
+
 use clap::{ArgAction, Parser};
-use std::{process::exit, time::Duration};
+use std::{fs::File, process::exit, time::Duration};
 use tokio::{
     io::{AsyncWriteExt, stderr},
     time::sleep,
 };
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 #[derive(clap::Parser)]
 struct Args {
@@ -19,6 +22,9 @@ struct Args {
     /// Generate the recipe and dump as YAML but do not build
     #[clap(long)]
     pub generate: bool,
+    /// Enable profiling and write trace data to the specified file
+    #[clap(long)]
+    pub profile: Option<String>,
     #[cfg(feature = "graphviz")]
     /// Draw the graph of the build process
     /// This will create a file named `graph.svg` in the current directory
@@ -33,20 +39,37 @@ struct Args {
 async fn main() {
     let job_limit = num_cpus::get();
     let args = Args::parse();
-    env_logger::Builder::new()
-        .filter_level(log::LevelFilter::Error)
-        .filter_module(
-            "gftools_builder::buildsystem",
-            match args.verbose {
-                0 => log::LevelFilter::Warn,
-                1 => log::LevelFilter::Info,
-                _ => log::LevelFilter::Debug,
-            },
-        )
-        .format_timestamp(Some(env_logger::TimestampPrecision::Seconds))
-        .format_module_path(false)
-        .format_target(false)
-        .init();
+
+    // Initialize tracing subscriber if profiling is enabled
+    if let Some(ref profile_file) = args.profile {
+        // Set up the tracing subscriber with JSON output to the specified file
+        let file = File::create(profile_file).unwrap_or_else(|e| {
+            eprintln!(
+                "Could not create profiling output file {}: {}",
+                profile_file, e
+            );
+            exit(1)
+        });
+
+        let env_filter = EnvFilter::new("gftools_builder=info");
+
+        // Set up the tracing subscriber with JSON output to stderr
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(
+                fmt::layer()
+                    .json()
+                    .with_writer(file)
+                    .with_level(true)
+                    .with_target(true)
+                    .with_thread_ids(true)
+                    .with_file(true)
+                    .with_line_number(true),
+            )
+            .init();
+    }
+
+    log::info!("Starting gftools-builder with {} parallel jobs", job_limit);
     let config_yaml = std::fs::read_to_string(&args.config_file).unwrap_or_else(|e| {
         log::error!("Could not read config file {}: {e}", args.config_file);
         exit(1)

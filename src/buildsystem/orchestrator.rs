@@ -21,6 +21,7 @@ use tokio::{
     time::Instant,
     try_join,
 };
+use tracing::{Instrument, debug, info, info_span};
 
 // #[derive(Clone)]
 pub struct Configuration {
@@ -40,12 +41,68 @@ impl Configuration {
 type RawBuildFuture = Pin<Box<dyn Future<Output = Result<(), ApplicationError>> + Send>>;
 pub(crate) type BuildFuture = Shared<RawBuildFuture>;
 
+/// Helper function to get target filenames for a given node index.
+/// This traces through outgoing edges to find all named output files associated with this build step.
+fn get_target_files(context: &Context, index: NodeIndex) -> Vec<String> {
+    let mut targets = vec![];
+
+    // Get immediate outputs
+    if let Some(_build) = context.configuration.graph().node_weight(index) {
+        for edge in context
+            .configuration
+            .graph()
+            .edges_directed(index, Direction::Outgoing)
+        {
+            if let Ok(output_lock) = edge.weight().lock() {
+                if let crate::buildsystem::output::RawOperationOutput::NamedFile(name) =
+                    &*output_lock
+                {
+                    targets.push(name.clone());
+                }
+            }
+        }
+    }
+
+    // If we have no targets yet, look further downstream for named files
+    if targets.is_empty() {
+        let mut to_visit = vec![index];
+        let mut visited = HashSet::new();
+
+        while let Some(current) = to_visit.pop() {
+            if visited.contains(&current) {
+                continue;
+            }
+            visited.insert(current);
+
+            for edge in context
+                .configuration
+                .graph()
+                .edges_directed(current, Direction::Outgoing)
+            {
+                if let Ok(output_lock) = edge.weight().lock() {
+                    if let crate::buildsystem::output::RawOperationOutput::NamedFile(name) =
+                        &*output_lock
+                    {
+                        targets.push(name.clone());
+                        break; // Found a named output, stop for this path
+                    }
+                }
+                to_visit.push(edge.target());
+            }
+        }
+    }
+
+    targets
+}
+
 pub async fn run(graph: BuildGraph, job_limit: usize) -> Result<(), ApplicationError> {
     let configuration = Configuration::new(graph);
     let context = Arc::new(Context::new(job_limit, Arc::new(configuration)));
     // Work out the final targets.
     let final_targets: HashSet<NodeIndex> =
         HashSet::from_iter(context.configuration.graph().externals(Direction::Outgoing));
+
+    log::info!("Starting build for {} targets", final_targets.len());
 
     for target in final_targets {
         trigger_build(context.clone(), target).await?;
@@ -65,8 +122,14 @@ pub async fn run(graph: BuildGraph, job_limit: usize) -> Result<(), ApplicationE
 
 #[async_recursion]
 async fn trigger_build(context: Arc<Context>, build: NodeIndex) -> Result<(), ApplicationError> {
+    let targets = get_target_files(&context, build);
+    let targets_str = targets.join(", ");
+    let span = info_span!("trigger_build", targets = %targets_str);
+
     context.build_futures.entry(build).or_insert_with(|| {
-        let future: RawBuildFuture = Box::pin(spawn_build(context.clone(), build));
+        let context_clone = context.clone();
+        let future: RawBuildFuture =
+            Box::pin(spawn_build(context_clone, build).instrument(span.clone()));
         future.shared()
     });
 
@@ -75,35 +138,46 @@ async fn trigger_build(context: Arc<Context>, build: NodeIndex) -> Result<(), Ap
 
 async fn spawn_build(context: Arc<Context>, index: NodeIndex) -> Result<(), ApplicationError> {
     spawn(async move {
-        let build = context
-            .configuration
-            .graph()
-            .node_weight(index)
-            .expect("Build step not found in graph");
-        let mut futures = vec![];
+        let targets = get_target_files(&context, index);
+        let targets_str = targets.join(", ");
+        let span = info_span!("spawn_build",
+            operation = %context.configuration.graph().node_weight(index).map(|op| op.shortname()).unwrap_or("unknown"),
+            targets = %targets_str
+        );
 
-        // Make sure we have all our dependencies. (in-edges of this index)
-        let in_edges = context
-            .configuration
-            .graph()
-            .edges_directed(index, Direction::Incoming);
-        let mut input_files = vec![];
-        let output_files: Vec<OperationOutput> = context
-            .configuration
-            .graph()
-            .edges_directed(index, Direction::Outgoing)
-            .map(|edge| edge.weight().clone())
-            .collect::<Vec<_>>();
-        for input_dependency in in_edges {
-            futures.push(build_input(context.clone(), input_dependency.source()).await?);
-            input_files.push(input_dependency.weight().clone());
+        async {
+            let build = context
+                .configuration
+                .graph()
+                .node_weight(index)
+                .expect("Build step not found in graph");
+            let mut futures = vec![];
+
+            // Make sure we have all our dependencies. (in-edges of this index)
+            let in_edges = context
+                .configuration
+                .graph()
+                .edges_directed(index, Direction::Incoming);
+            let mut input_files = vec![];
+            let output_files: Vec<OperationOutput> = context
+                .configuration
+                .graph()
+                .edges_directed(index, Direction::Outgoing)
+                .map(|edge| edge.weight().clone())
+                .collect::<Vec<_>>();
+            for input_dependency in in_edges {
+                futures.push(build_input(context.clone(), input_dependency.source()).await?);
+                input_files.push(input_dependency.weight().clone());
+            }
+            try_join_all(futures).await?;
+
+            // OK, we are ready.
+            run_op(&context, build, &input_files, &output_files).await?;
+
+            Ok::<(), ApplicationError>(())
         }
-        try_join_all(futures).await?;
-
-        // OK, we are ready.
-        run_op(&context, build, &input_files, &output_files).await?;
-
-        Ok(())
+        .instrument(span)
+        .await
     })
     .await?
 }
@@ -127,6 +201,15 @@ async fn run_op(
     inputs: &[OperationOutput],
     outputs: &[OperationOutput],
 ) -> Result<(), ApplicationError> {
+    let output_strs: Vec<String> = outputs.iter().map(|o| o.to_string()).collect();
+    let outputs_str = output_strs.join(", ");
+
+    let span = info_span!(
+        "run_op",
+        operation = %op.shortname(),
+        targets = %outputs_str
+    );
+
     let description = format!(
         "{}: {} -> {} ({})",
         op.shortname(),
@@ -142,40 +225,51 @@ async fn run_op(
             .join(", "),
         op.description()
     );
-    let ((output, _duration), _console) = try_join!(
-        async {
-            let start_time = Instant::now();
-            if !inputs.is_empty() && !outputs.is_empty() {
-                log::info!("Starting {}", &description);
-            }
-            let output = context
-                .run_with_semaphore(|| op.execute(inputs, outputs))
-                .await?;
 
-            Ok::<_, ApplicationError>((output, Instant::now() - start_time))
-        },
-        async {
-            let console = context.console().lock().await;
-            if !inputs.is_empty() && !outputs.is_empty() {
-                stderr()
-                    .write_all(format!("{}\n", &description).as_bytes())
+    let inner = async {
+        let ((output, duration), _console) = try_join!(
+            async {
+                let start_time = Instant::now();
+                if !inputs.is_empty() && !outputs.is_empty() {
+                    log::info!("Starting {}", &description);
+                    debug!("Executing operation: {}", &description);
+                }
+                let output = context
+                    .run_with_semaphore(|| op.execute(inputs, outputs))
                     .await?;
+
+                let elapsed = Instant::now() - start_time;
+                Ok::<_, ApplicationError>((output, elapsed))
+            },
+            async {
+                let console = context.console().lock().await;
+                if !inputs.is_empty() && !outputs.is_empty() {
+                    stderr()
+                        .write_all(format!("{}\n", &description).as_bytes())
+                        .await?;
+                }
+                // debug!(context, console, "command: {}", rule.command());
+
+                Ok(console)
             }
-            // debug!(context, console, "command: {}", rule.command());
+        )?;
 
-            Ok(console)
+        // Emit profiling event with duration for trace analysis
+        info!(
+            duration_ms = duration.as_millis() as u64,
+            "Operation completed: {}", &description
+        );
+
+        if !output.status.success() {
+            stdout().write_all(&output.stdout).await?;
+            stderr().write_all(&output.stderr).await?;
+            return Err(ApplicationError::Build);
         }
-    )?;
 
-    // profile!(context, console, "duration: {}ms", duration.as_millis());
+        Ok::<(), ApplicationError>(())
+    };
 
-    if !output.status.success() {
-        stdout().write_all(&output.stdout).await?;
-        stderr().write_all(&output.stderr).await?;
-        return Err(ApplicationError::Build);
-    }
-
-    Ok(())
+    inner.instrument(span).await
 }
 
 pub struct Context {
@@ -212,16 +306,3 @@ impl Context {
         Ok(output)
     }
 }
-
-// #[allow(dead_code)]
-// async fn run_cross_platform(command: &str) -> Result<Output, std::io::Error> {
-//     if cfg!(target_os = "windows") {
-//         let components = command.split_whitespace().collect::<Vec<_>>();
-//         Command::new(components[0])
-//             .args(&components[1..])
-//             .output()
-//             .await
-//     } else {
-//         Command::new("sh").arg("-ec").arg(command).output().await
-//     }
-// }

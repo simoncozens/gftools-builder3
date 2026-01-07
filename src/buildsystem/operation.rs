@@ -50,6 +50,20 @@ pub trait Operation: Send + Sync {
         log::debug!("Outputs: {:?}", outputs);
         Ok(output)
     }
+    // You might want this later
+
+    // #[allow(dead_code)]
+    // async fn run_cross_platform(command: &str) -> Result<Output, std::io::Error> {
+    //     if cfg!(target_os = "windows") {
+    //         let components = command.split_whitespace().collect::<Vec<_>>();
+    //         Command::new(components[0])
+    //             .args(&components[1..])
+    //             .output()
+    //             .await
+    //     } else {
+    //         Command::new("sh").arg("-ec").arg(command).output().await
+    //     }
+    // }
 }
 
 impl std::fmt::Debug for dyn Operation {
