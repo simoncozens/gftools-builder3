@@ -42,13 +42,12 @@ pub trait Operation: Send + Sync {
         outputs: &[OperationOutput],
     ) -> Result<Output, ApplicationError> {
         log::debug!("Running shell command: {}", cmd);
-        let output = std::process::Command::new("sh")
+        let process_output = std::process::Command::new("sh")
             .arg("-c")
             .arg(cmd)
             .output()
             .map_err(|e| ApplicationError::Other(e.to_string()))?;
-        log::debug!("Outputs: {:?}", outputs);
-        Ok(output)
+        Ok(process_output)
     }
     // You might want this later
 

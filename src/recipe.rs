@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::HashMap, sync::Arc};
+use tracing::{info_span, span};
 
 use crate::{
     buildsystem::{BuildGraph, BuildStep},
@@ -164,6 +165,8 @@ impl<'de> Deserialize<'de> for Config {
 
 impl Config {
     pub(crate) fn recipe(&self) -> Result<Recipe, ApplicationError> {
+        let span = info_span!("generate_recipe").entered();
+
         let mut recipe = if let Some(provider) = &self.recipe_provider {
             provider.generate_recipe()?
         } else {
@@ -175,6 +178,7 @@ impl Config {
     }
 
     pub(crate) fn to_graph(&self) -> Result<BuildGraph, ApplicationError> {
+        let span = info_span!("generate_graph").entered();
         let mut graph = BuildGraph::new();
         let recipe = self.recipe()?;
         for (target, operation) in recipe {

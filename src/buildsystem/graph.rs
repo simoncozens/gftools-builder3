@@ -65,15 +65,6 @@ impl BuildGraph {
                 .map(|edge| edge.target())
             {
                 current_node = existing_node;
-                // If there's a sink node from this node, use that as the current instead.
-                if let Some(sink_node) = self
-                    .graph
-                    .edges_directed(current_node, petgraph::Direction::Outgoing)
-                    .find(|edge| self.sinks.contains(&edge.target()))
-                    .map(|edge| edge.target())
-                {
-                    current_node = sink_node;
-                }
                 continue;
             }
             // Otherwise, we add a new node for this operation.

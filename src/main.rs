@@ -4,6 +4,7 @@ mod operations;
 mod recipe;
 mod recipe_providers;
 
+use tracing_chrome::ChromeLayerBuilder;
 use tracing_subscriber::{prelude::*, registry::Registry};
 
 use clap::{ArgAction, Parser};
@@ -41,6 +42,11 @@ async fn main() {
     let args = Args::parse();
 
     // Initialize tracing subscriber if profiling is enabled
+    let (chrome_layer, _guard) = ChromeLayerBuilder::new()
+        .include_args(true)
+        .include_locations(true)
+        .build();
+
     if let Some(ref profile_file) = args.profile {
         // Set up the tracing subscriber with JSON output to the specified file
         let file = File::create(profile_file).unwrap_or_else(|e| {
@@ -56,16 +62,7 @@ async fn main() {
         // Set up the tracing subscriber with JSON output to stderr
         tracing_subscriber::registry()
             .with(env_filter)
-            .with(
-                fmt::layer()
-                    .json()
-                    .with_writer(file)
-                    .with_level(true)
-                    .with_target(true)
-                    .with_thread_ids(true)
-                    .with_file(true)
-                    .with_line_number(true),
-            )
+            .with(chrome_layer)
             .init();
     }
 

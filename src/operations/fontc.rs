@@ -6,6 +6,7 @@ use crate::{
     error::ApplicationError,
 };
 use fontc::generate_font;
+use tracing::info_span;
 
 #[derive(PartialEq, Debug)]
 pub(crate) struct Fontc;
@@ -19,6 +20,7 @@ impl Operation for Fontc {
         inputs: &[OperationOutput],
         outputs: &[OperationOutput],
     ) -> Result<Output, ApplicationError> {
+        let span = info_span!("fontc").entered();
         let input_file = inputs
             .first()
             .ok_or_else(|| ApplicationError::WrongInputs("No input file provided".to_string()))?

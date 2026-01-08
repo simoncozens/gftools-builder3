@@ -140,7 +140,7 @@ async fn spawn_build(context: Arc<Context>, index: NodeIndex) -> Result<(), Appl
     spawn(async move {
         let targets = get_target_files(&context, index);
         let targets_str = targets.join(", ");
-        let span = info_span!("spawn_build",
+        let span = info_span!("Building",
             operation = %context.configuration.graph().node_weight(index).map(|op| op.shortname()).unwrap_or("unknown"),
             targets = %targets_str
         );

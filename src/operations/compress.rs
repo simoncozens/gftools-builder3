@@ -3,7 +3,8 @@ use std::{
     process::{ExitStatus, Output},
 };
 
-use ttf2woff2::{BrotliQuality, encode};
+use tracing::info_span;
+use ttf2woff2::{encode, BrotliQuality};
 
 use crate::{
     buildsystem::{Operation, OperationOutput},
@@ -22,6 +23,7 @@ impl Operation for Compress {
         inputs: &[OperationOutput],
         outputs: &[OperationOutput],
     ) -> Result<Output, ApplicationError> {
+        let _span = info_span!("woff2compress").entered();
         let input_file = inputs
             .first()
             .ok_or_else(|| ApplicationError::WrongInputs("No input file provided".to_string()))?;

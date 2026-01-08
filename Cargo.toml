@@ -46,6 +46,7 @@ babelfont = { git = "https://github.com/simoncozens/babelfont-rs", version = "0.
 fontdrasil = "0.4.0"
 ttf2woff2 = { version = "0.10.3", default-features = false }
 ascii-dag = "0.4.0"
+tracing-chrome = "0.7.2"
 
 [dev-dependencies]
 pretty_assertions = "1"
