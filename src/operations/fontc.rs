@@ -20,7 +20,7 @@ impl Operation for Fontc {
         inputs: &[OperationOutput],
         outputs: &[OperationOutput],
     ) -> Result<Output, ApplicationError> {
-        let span = info_span!("fontc").entered();
+        let _span = info_span!("fontc").entered();
         let input_file = inputs
             .first()
             .ok_or_else(|| ApplicationError::WrongInputs("No input file provided".to_string()))?

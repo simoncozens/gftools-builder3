@@ -5,15 +5,14 @@ mod recipe;
 mod recipe_providers;
 
 use tracing_chrome::ChromeLayerBuilder;
-use tracing_subscriber::{prelude::*, registry::Registry};
 
 use clap::{ArgAction, Parser};
-use std::{fs::File, process::exit, time::Duration};
+use std::{process::exit, time::Duration};
 use tokio::{
     io::{AsyncWriteExt, stderr},
     time::sleep,
 };
-use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+use tracing_subscriber::{EnvFilter, prelude::*};
 
 #[derive(clap::Parser)]
 struct Args {
@@ -40,22 +39,15 @@ struct Args {
 async fn main() {
     let job_limit = num_cpus::get();
     let args = Args::parse();
-
-    // Initialize tracing subscriber if profiling is enabled
-    let (chrome_layer, _guard) = ChromeLayerBuilder::new()
-        .include_args(true)
-        .include_locations(true)
-        .build();
-
+    let mut _guard = None;
     if let Some(ref profile_file) = args.profile {
-        // Set up the tracing subscriber with JSON output to the specified file
-        let file = File::create(profile_file).unwrap_or_else(|e| {
-            eprintln!(
-                "Could not create profiling output file {}: {}",
-                profile_file, e
-            );
-            exit(1)
-        });
+        // Initialize tracing subscriber if profiling is enabled
+        let (chrome_layer, guard) = ChromeLayerBuilder::new()
+            .include_args(true)
+            .include_locations(true)
+            .file(profile_file)
+            .build();
+        _guard = Some(guard);
 
         let env_filter = EnvFilter::new("gftools_builder=info");
 

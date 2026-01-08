@@ -4,7 +4,7 @@ use crate::{
     buildsystem::{Operation, OperationOutput},
     error::ApplicationError,
 };
-use std::{os::unix::process::ExitStatusExt as _, process::Output};
+use std::process::Output;
 
 #[derive(PartialEq, Debug)]
 pub(crate) struct Fix {
@@ -25,7 +25,7 @@ impl Operation for Fix {
         inputs: &[OperationOutput],
         outputs: &[OperationOutput],
     ) -> Result<Output, ApplicationError> {
-        let span = info_span!("gftools-fix-font").entered();
+        let _span = info_span!("gftools-fix-font").entered();
         let cmd = format!(
             "gftools-fix-font {} -o {} {}",
             inputs[0].to_filename()?,

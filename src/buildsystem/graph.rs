@@ -9,8 +9,18 @@ use crate::error::ApplicationError;
 
 pub type BuildStep = Arc<Box<dyn Operation>>;
 
+/// An edge in the build graph, representing data flow from one operation to another.
+/// The edge specifies which output slot from the source operation it consumes.
+#[derive(Clone)]
+pub struct BuildEdge {
+    /// The actual data/file being passed
+    pub output: OperationOutput,
+    /// Which output slot from the source operation (0-indexed)
+    pub output_slot: usize,
+}
+
 pub struct BuildGraph {
-    graph: Graph<Arc<Box<dyn Operation + 'static>>, OperationOutput>,
+    graph: Graph<Arc<Box<dyn Operation + 'static>>, BuildEdge>,
     pub source: NodeIndex,
     pub sinks: Vec<NodeIndex>,
 }
@@ -38,7 +48,7 @@ impl BuildGraph {
         &'_ self,
         index: NodeIndex,
         direction: petgraph::Direction,
-    ) -> impl Iterator<Item = petgraph::graph::EdgeReference<'_, OperationOutput>> {
+    ) -> impl Iterator<Item = petgraph::graph::EdgeReference<'_, BuildEdge>> {
         self.graph.edges_directed(index, direction)
     }
 
@@ -50,40 +60,93 @@ impl BuildGraph {
     ) {
         let mut current_node = self.source;
         for (index, (input_filename, op)) in operations.into_iter().enumerate() {
-            let output = if let Some(input_filename) = input_filename {
+            let computed_output: OperationOutput = if let Some(input_filename) = input_filename {
                 RawOperationOutput::from(input_filename.as_ref()).into()
             } else if index == 0 {
                 RawOperationOutput::from(source_filename).into()
             } else {
                 RawOperationOutput::TemporaryFile(None).into()
             };
-            // If there is an outgoing edge into the same operation with the same output, we use that node.
+
+            let is_source = current_node == self.source;
+
+            // If this node already has outgoing edges, reuse their output to broadcast
+            // to any new downstream operations — except for the Source node, which must
+            // keep per-source outputs distinct.
+            let broadcast_output = if is_source {
+                computed_output.clone()
+            } else {
+                self
+                    .graph
+                    .edges_directed(current_node, petgraph::Direction::Outgoing)
+                    .next()
+                    .map(|edge| edge.weight().output.clone())
+                    .unwrap_or_else(|| computed_output.clone())
+            };
+
+            // Check if there's already an outgoing edge to the same operation.
+            // For the Source node we also require the same output (file) to avoid
+            // collapsing different source files.
             if let Some(existing_node) = self
                 .graph
                 .edges_directed(current_node, petgraph::Direction::Outgoing)
-                .find(|edge| edge.weight() == &output && self.graph[edge.target()] == op)
+                .find(|edge| {
+                    let same_op = self.graph[edge.target()] == op;
+                    if is_source {
+                        same_op && edge.weight().output == computed_output
+                    } else {
+                        same_op
+                    }
+                })
                 .map(|edge| edge.target())
             {
                 current_node = existing_node;
                 continue;
             }
-            // Otherwise, we add a new node for this operation.
+
+            // Otherwise, add a new node for this operation using the chosen output.
             let next_node = self.graph.add_node(op);
-            self.graph.update_edge(current_node, next_node, output);
+            let edge = BuildEdge {
+                output: broadcast_output,
+                output_slot: 0, // Default to slot 0 for simple cases
+            };
+            self.graph.update_edge(current_node, next_node, edge);
             current_node = next_node;
         }
-        let final_output = RawOperationOutput::from(sink_filename).into();
-        // Create a sink node and add it to the list of sinks
+        
+        // When adding a sink edge, force the output to be the named target file
+        // and broadcast that same OperationOutput to all existing outgoing edges.
+        let final_output: OperationOutput = RawOperationOutput::from(sink_filename).into();
+
+        // If there are existing outgoing edges, update them to use the named output
+        // so downstream consumers see the real target filename (not a temp file).
+        let outgoing: Vec<_> = self
+            .graph
+            .edges_directed(current_node, petgraph::Direction::Outgoing)
+            .map(|e| (e.target(), e.weight().output_slot))
+            .collect();
+        for (target, slot) in outgoing {
+            let edge = BuildEdge {
+                output: final_output.clone(),
+                output_slot: slot,
+            };
+            self.graph.update_edge(current_node, target, edge);
+        }
+
+        // Create a sink node and add it to the list of sinks, using slot 0
         let sink_node = self.graph.add_node(Arc::new(Box::new(SourceSink::Sink)));
-        self.graph
-            .update_edge(current_node, sink_node, final_output);
+        let edge = BuildEdge {
+            output: final_output,
+            output_slot: 0,
+        };
+        self.graph.update_edge(current_node, sink_node, edge);
         self.sinks.push(sink_node);
     }
 
     pub fn ensure_directories(&self) -> Result<(), ApplicationError> {
         for edge in self.graph.raw_edges() {
-            if edge.weight.is_named_file()
-                && let Some(parent) = std::path::Path::new(&edge.weight.to_filename()?).parent()
+            if edge.weight.output.is_named_file()
+                && let Some(parent) = std::path::Path::new(&edge.weight.output.to_filename()?).parent()
             {
                 std::fs::create_dir_all(parent).map_err(|e| {
                     ApplicationError::Other(format!(
@@ -127,7 +190,7 @@ impl BuildGraph {
         }
         // Now let's add nodes for the edges
         for edge in self.graph.raw_edges() {
-            let edge_node = graph.add_node(format!("{}", edge.weight));
+            let edge_node = graph.add_node(format!("{}", edge.weight.output));
             graph.add_edge(edge.source(), edge_node, ());
             graph.add_edge(edge_node, edge.target(), ());
         }

@@ -39,7 +39,7 @@ pub trait Operation: Send + Sync {
     fn run_shell_command(
         &self,
         cmd: &str,
-        outputs: &[OperationOutput],
+        _outputs: &[OperationOutput],
     ) -> Result<Output, ApplicationError> {
         log::debug!("Running shell command: {}", cmd);
         let process_output = std::process::Command::new("sh")
