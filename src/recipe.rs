@@ -301,8 +301,11 @@ sources: "NotAnArray"
         match result {
             Err(e) => {
                 let err_msg = format!("{}", e);
-                assert!(err_msg.contains("Failed to parse GoogleFonts provider options"),
-                    "Expected error message to contain 'Failed to parse GoogleFonts provider options', got: {}", err_msg);
+                assert!(
+                    err_msg.contains("Failed to parse GoogleFonts provider options"),
+                    "Expected error message to contain 'Failed to parse GoogleFonts provider options', got: {}",
+                    err_msg
+                );
             }
             Ok(_) => panic!("Expected deserialization to fail, but it succeeded"),
         }

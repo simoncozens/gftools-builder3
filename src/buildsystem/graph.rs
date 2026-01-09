@@ -73,10 +73,10 @@ impl BuildGraph {
         let mut current_node = self.source;
         // Track the current data kind flowing out of current_node (slot 0)
         let mut current_kind: DataKind = DataKind::Path; // source produces paths
-        
+
         // Track the operation nodes we add (not including converters)
         let mut op_nodes: Vec<NodeIndex> = Vec::new();
-        
+
         for (index, (input_filename, op)) in operations.into_iter().enumerate() {
             // Determine default output placeholder based on current_kind
             let default_output_for_kind = |k: DataKind| -> OperationOutput {
@@ -138,7 +138,7 @@ impl BuildGraph {
                             }
                         })
                         .map(|edge| edge.target());
-                    
+
                     let conv_node = if let Some(existing) = existing_conv {
                         // Reuse existing converter
                         existing
@@ -156,7 +156,7 @@ impl BuildGraph {
                         );
                         new_conv_node
                     };
-                    
+
                     // Advance current node and kind
                     current_node = conv_node;
                     current_kind = new_kind;
@@ -182,7 +182,7 @@ impl BuildGraph {
                 current_node = existing_node;
                 // Still track this as an operation node for the path
                 op_nodes.push(existing_node);
-                
+
                 // Update current_kind to match the existing node's output kind
                 if let Some(ok) = self
                     .graph
@@ -193,7 +193,7 @@ impl BuildGraph {
                         current_kind = ok;
                     }
                 }
-                
+
                 continue;
             }
 
@@ -205,10 +205,10 @@ impl BuildGraph {
             };
             self.graph.update_edge(current_node, next_node, edge);
             current_node = next_node;
-            
+
             // Track this operation node (not a converter)
             op_nodes.push(next_node);
-            
+
             // Update current_kind to this op's first output kind if specified
             if let Some(ok) = self
                 .graph
@@ -248,10 +248,11 @@ impl BuildGraph {
         };
         self.graph.update_edge(current_node, sink_node, edge);
         self.sinks.push(sink_node);
-        
+
         // Track this target's final node (before sink) for dependency resolution
-        self.target_nodes.insert(sink_filename.to_string(), current_node);
-        
+        self.target_nodes
+            .insert(sink_filename.to_string(), current_node);
+
         // Return the list of operation nodes added (in order)
         op_nodes
     }
@@ -260,7 +261,7 @@ impl BuildGraph {
     /// This creates edges from the dependency target's producing node to the dependent node.
     /// For operations that need n inputs and produce n outputs (like BuildStat), this also
     /// redirects the dependency's sink to go through the dependent node.
-    /// 
+    ///
     /// # Arguments
     /// * `target_name` - The name of the target that produces the needed file
     /// * `dependent_node` - The node that needs the target as an additional input
@@ -291,7 +292,8 @@ impl BuildGraph {
             output: producer_output.clone(),
             output_slot: input_slot,
         };
-        self.graph.update_edge(*producer_node, dependent_node, input_edge);
+        self.graph
+            .update_edge(*producer_node, dependent_node, input_edge);
 
         // Find the sink node for this dependency target and redirect it through dependent_node
         // We need to find the sink that's writing to this specific target file
@@ -319,13 +321,14 @@ impl BuildGraph {
             if let Some(edge_idx) = self.graph.find_edge(*producer_node, sink_node) {
                 self.graph.remove_edge(edge_idx);
             }
-            
+
             // Add edge from dependent_node to sink using the same output slot as the input
             let output_edge = BuildEdge {
                 output,
                 output_slot: input_slot,
             };
-            self.graph.update_edge(dependent_node, sink_node, output_edge);
+            self.graph
+                .update_edge(dependent_node, sink_node, output_edge);
         }
 
         Ok(())

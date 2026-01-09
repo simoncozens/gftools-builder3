@@ -263,7 +263,7 @@ impl GoogleFontsProvider {
                 .keys()
                 .find(|k| !k.ends_with(".woff2"))
                 .cloned();
-            
+
             if let Some(first_target) = first_ttf_target {
                 // Collect other TTF targets as dependencies (skip the first one we're adding to)
                 let other_targets: Vec<String> = flat_recipes
@@ -271,7 +271,7 @@ impl GoogleFontsProvider {
                     .filter(|k| !k.ends_with(".woff2") && *k != &first_target)
                     .cloned()
                     .collect();
-                
+
                 // Add BuildStat to the first TTF recipe
                 if let Some(recipe) = flat_recipes.get_mut(&first_target) {
                     recipe.0.push(crate::recipe::Step::OperationStep {
@@ -367,5 +367,4 @@ impl GoogleFontsProvider {
 
         None
     }
-
 }

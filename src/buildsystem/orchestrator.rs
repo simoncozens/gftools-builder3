@@ -56,9 +56,9 @@ fn get_target_files(context: &Context, index: NodeIndex) -> Vec<String> {
             if let Ok(output_lock) = edge.weight().output.lock()
                 && let crate::buildsystem::output::RawOperationOutput::NamedFile(name) =
                     &*output_lock
-                {
-                    targets.push(name.clone());
-                }
+            {
+                targets.push(name.clone());
+            }
         }
     }
 
@@ -81,10 +81,10 @@ fn get_target_files(context: &Context, index: NodeIndex) -> Vec<String> {
                 if let Ok(output_lock) = edge.weight().output.lock()
                     && let crate::buildsystem::output::RawOperationOutput::NamedFile(name) =
                         &*output_lock
-                    {
-                        targets.push(name.clone());
-                        break; // Found a named output, stop for this path
-                    }
+                {
+                    targets.push(name.clone());
+                    break; // Found a named output, stop for this path
+                }
                 to_visit.push(edge.target());
             }
         }
@@ -242,9 +242,8 @@ async fn run_op(
         let ((output, duration), _console) = try_join!(
             async {
                 let start_time = Instant::now();
-                if !inputs.is_empty() && !outputs.is_empty() {
-                    log::info!("Starting {}", &description);
-                    debug!("Executing operation: {}", &description);
+                if !inputs.is_empty() && !outputs.is_empty() && !op.hidden() {
+                    println!("{}", &description);
                 }
                 let output = context
                     .run_with_semaphore(|| op.execute(inputs, outputs))
@@ -255,11 +254,11 @@ async fn run_op(
             },
             async {
                 let console = context.console().lock().await;
-                if !inputs.is_empty() && !outputs.is_empty() {
-                    stderr()
-                        .write_all(format!("{}\n", &description).as_bytes())
-                        .await?;
-                }
+                // if !inputs.is_empty() && !outputs.is_empty() && !op.hidden() {
+                //     stderr()
+                //         .write_all(format!("Completed {}\n", &description).as_bytes())
+                //         .await?;
+                // }
                 // debug!(context, console, "command: {}", rule.command());
 
                 Ok(console)

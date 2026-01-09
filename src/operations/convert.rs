@@ -43,6 +43,9 @@ impl Operation for FileToBytes {
             stderr: vec![],
         })
     }
+    fn hidden(&self) -> bool {
+        true
+    }
 }
 
 #[derive(PartialEq, Debug)]
@@ -68,11 +71,11 @@ impl Operation for BytesToTempFile {
         outputs: &[OperationOutput],
     ) -> Result<Output, ApplicationError> {
         let input = inputs
-            .get(0)
+            .first()
             .ok_or_else(|| ApplicationError::WrongInputs("No input".into()))?;
         let bytes = input.to_bytes()?;
         let out = outputs
-            .get(0)
+            .first()
             .ok_or_else(|| ApplicationError::WrongOutputs("Missing output slot 0".into()))?;
 
         // Force the output to create/get a temp file and write the bytes to it
@@ -85,5 +88,8 @@ impl Operation for BytesToTempFile {
             stdout: vec![],
             stderr: vec![],
         })
+    }
+    fn hidden(&self) -> bool {
+        true
     }
 }

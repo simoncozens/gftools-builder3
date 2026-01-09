@@ -50,6 +50,12 @@ pub trait Operation: Send + Sync {
     fn set_extra(&mut self, _extra: HashMap<String, Value>) {
         // Default implementation does nothing.
     }
+
+    /// Whether this operation should be hidden from user-facing output.
+    fn hidden(&self) -> bool {
+        false
+    }
+
     fn run_shell_command(
         &self,
         cmd: &str,

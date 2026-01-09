@@ -8,7 +8,7 @@ use crate::{
     buildsystem::{DataKind, Operation, OperationOutput},
     error::ApplicationError,
 };
-use fontc::{generate_font, Flags};
+use fontc::{Flags, generate_font};
 use serde::{Deserialize, Serialize};
 use tracing::info_span;
 

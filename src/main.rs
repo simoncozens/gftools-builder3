@@ -17,8 +17,8 @@ use tracing_subscriber::{EnvFilter, prelude::*};
 #[derive(clap::Parser)]
 struct Args {
     /// Increase logging
-    #[clap(short, long, action = ArgAction::Count, help_heading = "Logging")]
-    pub verbose: u8,
+    #[command(flatten)]
+    verbosity: clap_verbosity_flag::Verbosity,
     /// Generate the recipe and dump as YAML but do not build
     #[clap(long)]
     pub generate: bool,
@@ -57,7 +57,9 @@ async fn main() {
             .with(chrome_layer)
             .init();
     }
-
+    env_logger::Builder::new()
+        .filter_level(args.verbosity.into())
+        .init();
     log::info!("Starting gftools-builder with {} parallel jobs", job_limit);
     let config_yaml = std::fs::read_to_string(&args.config_file).unwrap_or_else(|e| {
         log::error!("Could not read config file {}: {e}", args.config_file);
@@ -71,14 +73,17 @@ async fn main() {
 
     // Change to the config file's directory
     if let Some(config_dir) = std::path::Path::new(&args.config_file).parent() {
-        std::env::set_current_dir(config_dir).unwrap_or_else(|e| {
-            log::error!(
-                "Could not change directory to config file's directory {}: {}",
-                config_dir.display(),
-                e
-            );
-            exit(1)
-        });
+        // If the config path has no parent (e.g. just "config.yaml"), stay in the current directory
+        if !config_dir.as_os_str().is_empty() {
+            std::env::set_current_dir(config_dir).unwrap_or_else(|e| {
+                log::error!(
+                    "Could not change directory to config file's directory {}: {}",
+                    config_dir.display(),
+                    e
+                );
+                exit(1)
+            });
+        }
     }
 
     if args.generate {
@@ -113,7 +118,10 @@ async fn main() {
             .unwrap_or_else(|_| panic!("Could not draw graph: {}", args.config_file));
         std::fs::write("graph.svg", graph)
             .unwrap_or_else(|_| panic!("Could not write graph to file: graph.svg"));
-        println!("Wrote build graph to {}/graph.svg", std::env::current_dir().unwrap().display());
+        println!(
+            "Wrote build graph to {}/graph.svg",
+            std::env::current_dir().unwrap().display()
+        );
         return;
     }
 
