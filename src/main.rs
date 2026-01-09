@@ -113,6 +113,8 @@ async fn main() {
             .unwrap_or_else(|_| panic!("Could not draw graph: {}", args.config_file));
         std::fs::write("graph.svg", graph)
             .unwrap_or_else(|_| panic!("Could not write graph to file: graph.svg"));
+        println!("Wrote build graph to {}/graph.svg", std::env::current_dir().unwrap().display());
+        return;
     }
 
     if args.ascii_graph {

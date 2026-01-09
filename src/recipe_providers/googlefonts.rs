@@ -6,7 +6,7 @@ use std::{collections::HashMap, path::Path};
 
 use crate::{
     error::ApplicationError,
-    operations::ConfigOperationBuilder,
+    operations::{ConfigOperationBuilder, fix::FixConfig, fontc::FontcConfig},
     recipe::{Provider, Recipe},
 };
 
@@ -36,6 +36,7 @@ pub type ItalicDescriptor = (String, UserCoord, UserCoord);
 
 #[serde_inline_default]
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct GoogleFontsOptions {
     #[serde(default)]
     pub sources: Vec<String>,
@@ -46,36 +47,28 @@ pub struct GoogleFontsOptions {
 
     // Path-related options
     #[serde_inline_default(".".to_string())]
-    #[serde(rename = "outputDir")]
     pub output_dir: String,
 
     #[serde_inline_default("$outputDir/variable".to_string())]
-    #[serde(rename = "vfDir")]
     pub vf_dir: String,
 
     #[serde_inline_default("$outputDir/ttf".to_string())]
-    #[serde(rename = "ttDir")]
     pub tt_dir: String,
 
     #[serde_inline_default("$outputDir/otf".to_string())]
-    #[serde(rename = "otDir")]
     pub ot_dir: String,
 
     #[serde_inline_default("$outputDir/woff".to_string())]
-    #[serde(rename = "woffDir")]
     pub woff_dir: String,
 
     #[serde(default)]
-    #[serde(rename = "filenameSuffix")]
     pub filename_suffix: Option<String>,
 
     // Options about what we build
     #[serde_inline_default(true)]
-    #[serde(rename = "buildVariable")]
     pub build_variable: bool,
 
     #[serde_inline_default(true)]
-    #[serde(rename = "buildStatic")]
     pub build_static: bool,
 
     // Oops, OTFs don't exist in the fontc universe
@@ -84,8 +77,15 @@ pub struct GoogleFontsOptions {
     pub build_ttf: bool,
 
     #[serde_inline_default(true)]
-    #[serde(rename = "buildWebfont")]
     pub build_webfont: bool,
+
+    // Fix arguments
+    #[serde(flatten, default)]
+    pub fix_config: FixConfig,
+
+    // Fontc arguments
+    #[serde(flatten, default)]
+    pub fontc_config: FontcConfig,
 }
 
 impl Default for GoogleFontsOptions {
@@ -212,10 +212,11 @@ impl GoogleFontsProvider {
 }
 
 impl Provider for GoogleFontsProvider {
-    fn generate_recipe(mut self) -> Result<Recipe, ApplicationError> {
-        self.load_all_sources()?;
+    fn generate_recipe(&self) -> Result<Recipe, ApplicationError> {
+        let mut provider = Self::new(self.options.clone());
+        provider.load_all_sources()?;
         // Implementation for rewriting the recipe for Google fonts
-        Ok(self.recipe)
+        Ok(provider.recipe)
     }
 }
 
@@ -235,7 +236,7 @@ impl GoogleFontsProvider {
         if !self.options.build_variable {
             return Ok(());
         }
-        let new_recipes = self
+        let mut new_recipes = self
             .sources
             .iter()
             .filter(|source| source.masters.len() >= 2)
@@ -251,11 +252,41 @@ impl GoogleFontsProvider {
                 }
             })
             .collect::<Result<Vec<Recipe>, ApplicationError>>()?;
-        // Do STAT table
-        // Do avar2
+        let mut flat_recipes = HashMap::new();
         for recipe in new_recipes {
-            self.recipe.extend(recipe);
+            flat_recipes.extend(recipe.clone());
         }
+        // Do STAT table
+        if !flat_recipes.is_empty() {
+            // Find a TTF target (not woff2) to add the BuildStat step to
+            let first_ttf_target = flat_recipes
+                .keys()
+                .find(|k| !k.ends_with(".woff2"))
+                .cloned();
+            
+            if let Some(first_target) = first_ttf_target {
+                // Collect other TTF targets as dependencies (skip the first one we're adding to)
+                let other_targets: Vec<String> = flat_recipes
+                    .keys()
+                    .filter(|k| !k.ends_with(".woff2") && *k != &first_target)
+                    .cloned()
+                    .collect();
+                
+                // Add BuildStat to the first TTF recipe
+                if let Some(recipe) = flat_recipes.get_mut(&first_target) {
+                    recipe.0.push(crate::recipe::Step::OperationStep {
+                        operation: crate::operations::OpStep::BuildStat,
+                        needs: other_targets,
+                        args: None,
+                        extra: HashMap::new(),
+                        input_file: None,
+                    });
+                }
+            }
+        }
+
+        // Do avar2
+        self.recipe.extend(flat_recipes);
         Ok(())
     }
 
@@ -293,11 +324,12 @@ impl GoogleFontsProvider {
                 .to_string(),
         );
         // Subset steps here
-        builder = builder.compile(HashMap::new());
+        builder = builder.compile(&self.options.fontc_config);
         // Any post-compile steps
         // Any VTT steps
         // If italic, subspace the axes according to style
-        builder = builder.fix(HashMap::new());
+
+        builder = builder.fix(&self.options.fix_config);
 
         if self.options.build_webfont {
             let webfont_target = self.options.vf_filename(
@@ -335,4 +367,5 @@ impl GoogleFontsProvider {
 
         None
     }
+
 }

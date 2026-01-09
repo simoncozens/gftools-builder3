@@ -1,3 +1,4 @@
+use babelfont::Font;
 use std::sync::{Arc, Mutex, MutexGuard};
 use tempfile::NamedTempFile;
 
@@ -37,6 +38,7 @@ pub enum RawOperationOutput {
     NamedFile(String),
     TemporaryFile(Option<NamedTempFile>),
     InMemoryBytes(Vec<u8>),
+    FontSource(babelfont::Font),
 }
 
 impl PartialEq for RawOperationOutput {
@@ -47,6 +49,9 @@ impl PartialEq for RawOperationOutput {
                 a.as_ref().map(|f| f.path()) == b.as_ref().map(|f| f.path())
             }
             (RawOperationOutput::InMemoryBytes(a), RawOperationOutput::InMemoryBytes(b)) => a == b,
+            (RawOperationOutput::FontSource(a), RawOperationOutput::FontSource(b)) => {
+                std::ptr::eq(a, b) // This is probably wrong and definitely evil.
+            }
             _ => false,
         }
     }
@@ -61,6 +66,12 @@ impl RawOperationOutput {
 impl From<&str> for RawOperationOutput {
     fn from(s: &str) -> Self {
         Self::from_str(s)
+    }
+}
+
+impl From<Font> for RawOperationOutput {
+    fn from(font: Font) -> Self {
+        Self::FontSource(font)
     }
 }
 
@@ -95,6 +106,14 @@ impl std::fmt::Display for OperationOutput {
             RawOperationOutput::NamedFile(name) => write!(f, "{name}"),
             RawOperationOutput::TemporaryFile(_) => write!(f, "<temporary file>"),
             RawOperationOutput::InMemoryBytes(_) => write!(f, "<in-memory bytes>"),
+            RawOperationOutput::FontSource(font) => write!(
+                f,
+                "<{} source>",
+                font.names
+                    .family_name
+                    .get_default()
+                    .unwrap_or(&"unknown".to_string())
+            ),
         }
     }
 }
@@ -109,6 +128,16 @@ impl std::fmt::Debug for OperationOutput {
                 write!(f, "NamedTemporaryFile({})", x.path().to_string_lossy())
             }
             RawOperationOutput::InMemoryBytes(_) => write!(f, "InMemoryBytes"),
+            RawOperationOutput::FontSource(font) => {
+                write!(
+                    f,
+                    "FontSource({})",
+                    font.names
+                        .family_name
+                        .get_default()
+                        .unwrap_or(&"unknown".to_string())
+                )
+            }
         }
     }
 }
@@ -144,6 +173,19 @@ impl OperationOutput {
                 let temp_path = temp_file.path();
                 let temp_path_string = temp_path.to_string_lossy().to_string();
                 std::fs::write(temp_path, bytes)
+                    .map_err(|e| ApplicationError::Other(e.to_string()))?;
+                *f = RawOperationOutput::TemporaryFile(Some(temp_file));
+                Ok(temp_path_string)
+            }
+            RawOperationOutput::FontSource(font) => {
+                // Convert in-memory bytes to a temp file by writing it in Glyphs format
+                let temp_file = NamedTempFile::with_suffix(".glyphs")
+                    .map_err(|e| ApplicationError::Other(e.to_string()))?;
+                // write
+                let temp_path = temp_file.path();
+                let temp_path_string = temp_path.to_string_lossy().to_string();
+
+                font.save(temp_path)
                     .map_err(|e| ApplicationError::Other(e.to_string()))?;
                 *f = RawOperationOutput::TemporaryFile(Some(temp_file));
                 Ok(temp_path_string)
@@ -192,6 +234,15 @@ impl OperationOutput {
                 "Temporary file is not set".to_string(),
             )),
             RawOperationOutput::InMemoryBytes(bytes) => Ok(bytes.clone()),
+            RawOperationOutput::FontSource(font) => {
+                // Convert in-memory bytes to a temp file by writing it in Glyphs format
+                // Unfortunately this currently requires a temp file on disk
+                let temp_file = self.to_filename()?;
+                // Noe read the bytes back
+                let buffer =
+                    std::fs::read(temp_file).map_err(|e| ApplicationError::Other(e.to_string()))?;
+                Ok(buffer)
+            }
         }
     }
 

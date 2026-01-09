@@ -53,13 +53,12 @@ fn get_target_files(context: &Context, index: NodeIndex) -> Vec<String> {
             .graph()
             .edges_directed(index, Direction::Outgoing)
         {
-            if let Ok(output_lock) = edge.weight().output.lock() {
-                if let crate::buildsystem::output::RawOperationOutput::NamedFile(name) =
+            if let Ok(output_lock) = edge.weight().output.lock()
+                && let crate::buildsystem::output::RawOperationOutput::NamedFile(name) =
                     &*output_lock
                 {
                     targets.push(name.clone());
                 }
-            }
         }
     }
 
@@ -79,14 +78,13 @@ fn get_target_files(context: &Context, index: NodeIndex) -> Vec<String> {
                 .graph()
                 .edges_directed(current, Direction::Outgoing)
             {
-                if let Ok(output_lock) = edge.weight().output.lock() {
-                    if let crate::buildsystem::output::RawOperationOutput::NamedFile(name) =
+                if let Ok(output_lock) = edge.weight().output.lock()
+                    && let crate::buildsystem::output::RawOperationOutput::NamedFile(name) =
                         &*output_lock
                     {
                         targets.push(name.clone());
                         break; // Found a named output, stop for this path
                     }
-                }
                 to_visit.push(edge.target());
             }
         }
@@ -159,19 +157,16 @@ async fn spawn_build(context: Arc<Context>, index: NodeIndex) -> Result<(), Appl
                 .graph()
                 .edges_directed(index, Direction::Incoming);
             let mut input_files = vec![];
-            
-            // Collect outputs by slot. Multiple edges may reference the same slot (broadcasting).
+                        // Collect outputs by slot. Multiple edges may reference the same slot (broadcasting).
             // We need to build a Vec where outputs[slot] contains the OperationOutput for that slot.
             let out_edges: Vec<_> = context
                 .configuration
                 .graph()
                 .edges_directed(index, Direction::Outgoing)
                 .collect();
-            
             // Find the maximum slot number to size our output vector
             let max_slot = out_edges.iter().map(|e| e.weight().output_slot).max().unwrap_or(0);
             let mut output_files = vec![None; max_slot + 1];
-            
             // Fill in the output slots - if multiple edges use the same slot, they share the same OperationOutput
             for edge in out_edges {
                 let slot = edge.weight().output_slot;
@@ -179,10 +174,9 @@ async fn spawn_build(context: Arc<Context>, index: NodeIndex) -> Result<(), Appl
                     output_files[slot] = Some(edge.weight().output.clone());
                 }
             }
-            
+
             // Convert to non-Option vec (all slots should be filled)
             let output_files: Vec<OperationOutput> = output_files.into_iter().flatten().collect();
-            
             for input_dependency in in_edges {
                 futures.push(build_input(context.clone(), input_dependency.source()).await?);
                 input_files.push(input_dependency.weight().output.clone());

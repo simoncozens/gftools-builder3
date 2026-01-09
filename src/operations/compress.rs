@@ -4,10 +4,10 @@ use std::{
 };
 
 use tracing::info_span;
-use ttf2woff2::{encode, BrotliQuality};
+use ttf2woff2::{BrotliQuality, encode};
 
 use crate::{
-    buildsystem::{Operation, OperationOutput},
+    buildsystem::{DataKind, Operation, OperationOutput},
     error::ApplicationError,
 };
 
@@ -18,6 +18,15 @@ impl Operation for Compress {
     fn shortname(&self) -> &str {
         "Compress"
     }
+
+    fn input_kinds(&self) -> Vec<DataKind> {
+        vec![DataKind::Bytes]
+    }
+
+    fn output_kinds(&self) -> Vec<DataKind> {
+        vec![DataKind::Bytes]
+    }
+
     fn execute(
         &self,
         inputs: &[OperationOutput],

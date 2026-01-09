@@ -1,7 +1,7 @@
 use std::process::Output;
 
 use crate::{
-    buildsystem::{Operation, OperationOutput},
+    buildsystem::{DataKind, Operation, OperationOutput},
     error::ApplicationError,
 };
 
@@ -12,6 +12,15 @@ impl Operation for Glyphs2UFO {
     fn shortname(&self) -> &str {
         "Glyphs2UFO"
     }
+
+    fn input_kinds(&self) -> Vec<DataKind> {
+        vec![DataKind::Path]
+    }
+
+    fn output_kinds(&self) -> Vec<DataKind> {
+        vec![DataKind::Path]
+    }
+
     fn execute(
         &self,
         inputs: &[OperationOutput],

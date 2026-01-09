@@ -5,6 +5,20 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::process::Output;
 
+/// Logical data kind that operations consume/produce
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DataKind {
+    Any,
+    /// Any filesystem path (named or temporary)
+    Path,
+    /// Raw in-memory bytes
+    Bytes,
+    /// Babelfont source font object
+    SourceFont,
+    /// Binary TrueType font (e.g., via skrifa::FontRef)
+    BinaryFont,
+}
+
 /// Trait representing a build operation
 ///
 /// An operation is a node in the build graph that takes some inputs and produces some outputs.
@@ -48,6 +62,17 @@ pub trait Operation: Send + Sync {
             .output()
             .map_err(|e| ApplicationError::Other(e.to_string()))?;
         Ok(process_output)
+    }
+
+    /// Declare the input kinds for this operation (one per input slot).
+    /// Defaults to a single `Any` input, meaning no constraints.
+    fn input_kinds(&self) -> Vec<DataKind> {
+        vec![DataKind::Any]
+    }
+    /// Declare the output kinds for this operation (one per output slot).
+    /// Defaults to a single `Any` output, meaning unspecified.
+    fn output_kinds(&self) -> Vec<DataKind> {
+        vec![DataKind::Any]
     }
     // You might want this later
 

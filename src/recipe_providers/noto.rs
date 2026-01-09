@@ -25,7 +25,7 @@ impl NotoProvider {
 }
 
 impl Provider for NotoProvider {
-    fn generate_recipe(mut self) -> Result<Recipe, ApplicationError> {
+    fn generate_recipe(&self) -> Result<Recipe, ApplicationError> {
         // Implementation for rewriting the recipe for Noto fonts
         Ok(Recipe::default())
     }

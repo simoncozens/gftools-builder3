@@ -16,59 +16,51 @@ use crate::{
 /// Enum representing different recipe providers as stored in the config file
 ///
 /// This is used during recipe deserialization to handle different provider-specific options.
-/// We handle the case where the provider is explicitly tagged - either as "googlefonts" or "noto" -
-/// as well as the untagged case where we assume "googlefonts" by default.
+/// We first determine which provider is requested, then parse its options separately
+/// to provide clear error messages.
 
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
-#[serde(untagged)]
-enum RecipeProvider {
-    TaggedGoogleFonts {
-        #[serde(rename = "recipeProvider")]
-        _recipe_provider: monostate::MustBe!("googlefonts"),
-        #[serde(flatten)]
-        options: GoogleFontsOptions,
-    },
-    Noto {
-        #[serde(rename = "recipeProvider")]
-        _recipe_provider: monostate::MustBe!("noto"),
-        #[serde(flatten)]
-        options: NotoFontsOptions,
-    },
-    Other {
-        #[serde(rename = "recipeProvider")]
-        recipe_provider: String,
-        options: HashMap<String, Value>,
-    },
-    UntaggedGoogleFonts {
-        #[serde(flatten)]
-        options: GoogleFontsOptions,
-    },
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+#[serde(rename_all = "lowercase")]
+enum RecipeProviderTag {
+    GoogleFonts,
+    Noto,
+}
+
+impl Default for RecipeProviderTag {
+    fn default() -> Self {
+        RecipeProviderTag::GoogleFonts
+    }
 }
 
 pub(crate) trait Provider {
-    fn generate_recipe(self) -> Result<Recipe, ApplicationError>;
+    fn generate_recipe(&self) -> Result<Recipe, ApplicationError>;
 }
 
-impl RecipeProvider {
-    pub fn generate_recipe(&self) -> Result<Recipe, ApplicationError> {
-        match self {
-            RecipeProvider::TaggedGoogleFonts { options, .. } => {
-                let provider = GoogleFontsProvider::new(options.clone());
-                provider.generate_recipe()
-            }
-            RecipeProvider::UntaggedGoogleFonts { options } => {
-                let provider = GoogleFontsProvider::new(options.clone());
-                provider.generate_recipe()
-            }
-            RecipeProvider::Noto { options, .. } => {
-                let provider = NotoProvider::new(options.clone());
-                provider.generate_recipe()
-            }
-            RecipeProvider::Other {
-                recipe_provider, ..
-            } => Err(ApplicationError::InvalidRecipe(format!(
-                "Unknown recipe provider: {recipe_provider}"
-            ))),
+/// Parse provider-specific options with clear error reporting
+fn parse_provider_options(
+    tag: &RecipeProviderTag,
+    raw_config: &serde_yaml_ng::Value,
+) -> Result<Box<dyn Provider>, ApplicationError> {
+    match tag {
+        RecipeProviderTag::GoogleFonts => {
+            let options: GoogleFontsOptions = serde_yaml_ng::from_value(raw_config.clone())
+                .map_err(|e| {
+                    ApplicationError::InvalidRecipe(format!(
+                        "Failed to parse GoogleFonts provider options: {}",
+                        e
+                    ))
+                })?;
+            Ok(Box::new(GoogleFontsProvider::new(options)))
+        }
+        RecipeProviderTag::Noto => {
+            let options: NotoFontsOptions =
+                serde_yaml_ng::from_value(raw_config.clone()).map_err(|e| {
+                    ApplicationError::InvalidRecipe(format!(
+                        "Failed to parse Noto provider options: {}",
+                        e
+                    ))
+                })?;
+            Ok(Box::new(NotoProvider::new(options)))
         }
     }
 }
@@ -80,10 +72,12 @@ pub(crate) enum Step {
         operation: OpStep,
         #[serde(default)]
         args: Option<String>,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         input_file: Option<String>,
-        #[serde(flatten)]
+        #[serde(flatten, skip_serializing_if = "HashMap::is_empty")]
         extra: HashMap<String, Value>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        needs: Vec<String>,
     },
     SourceStep {
         source: String,
@@ -93,19 +87,20 @@ pub(crate) enum Step {
 }
 
 impl Step {
-    fn to_operation(&self) -> Result<(Option<String>, BuildStep), ApplicationError> {
+    fn to_operation(&self) -> Result<(Option<String>, BuildStep, Vec<String>), ApplicationError> {
         match self {
             Step::OperationStep {
                 operation,
                 args,
                 extra,
                 input_file,
+                needs,
             } => {
                 let mut op = operation.operation();
                 op.set_extra(extra.clone());
                 op.set_args(args.clone());
-                // Here you can handle args and extra if needed
-                Ok((input_file.clone(), Arc::new(op)))
+                // Return the needs vector along with the operation
+                Ok((input_file.clone(), Arc::new(op), needs.clone()))
             }
             Step::SourceStep { source, extra: _ } => {
                 // Handle source step, possibly creating a Source operation
@@ -122,17 +117,18 @@ pub struct ConfigOperation(pub(crate) Vec<Step>);
 
 pub type Recipe = HashMap<String, ConfigOperation>;
 
-#[derive(Serialize, PartialEq, Debug)]
+#[derive(Serialize)]
 pub(crate) struct Config {
     #[serde(default)]
     recipe: Recipe,
-    #[serde(flatten)]
-    recipe_provider: Option<RecipeProvider>,
+    #[serde(skip)]
+    provider: Option<Box<dyn Provider>>,
 }
 
-// We need to deserialize manually because: If there is a recipe but no recipe provider,
-// the recipe provider is None. But if there is no recipe and no recipe provider, we want to
-// default to googlefonts.
+// We need to deserialize manually to:
+// 1. Separate provider tag detection from options parsing (for better error messages)
+// 2. Default to GoogleFonts when no provider and no recipe is specified
+// 3. Ignore provider when an explicit recipe is given
 impl<'de> Deserialize<'de> for Config {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -142,23 +138,31 @@ impl<'de> Deserialize<'de> for Config {
         struct ConfigHelper {
             #[serde(default)]
             recipe: Recipe,
+            #[serde(rename = "recipeProvider", default)]
+            recipe_provider_tag: Option<RecipeProviderTag>,
             #[serde(flatten)]
-            recipe_provider: Option<RecipeProvider>,
+            raw_config: serde_yaml_ng::Value,
         }
 
         let helper = ConfigHelper::deserialize(deserializer)?;
-        let nullify_provider = !helper.recipe.is_empty()
-            && matches!(
-                helper.recipe_provider,
-                Some(RecipeProvider::UntaggedGoogleFonts { .. })
-            );
+
+        // If there's an explicit recipe, don't use a provider
+        let provider = if !helper.recipe.is_empty() {
+            None
+        } else {
+            // Determine which provider to use (default to GoogleFonts)
+            let tag = helper.recipe_provider_tag.unwrap_or_default();
+
+            // Parse provider-specific options with clear error messages
+            Some(
+                parse_provider_options(&tag, &helper.raw_config)
+                    .map_err(serde::de::Error::custom)?,
+            )
+        };
+
         Ok(Config {
             recipe: helper.recipe,
-            recipe_provider: if nullify_provider {
-                None
-            } else {
-                helper.recipe_provider
-            },
+            provider,
         })
     }
 }
@@ -167,7 +171,7 @@ impl Config {
     pub(crate) fn recipe(&self) -> Result<Recipe, ApplicationError> {
         let _span = info_span!("generate_recipe").entered();
 
-        let mut recipe = if let Some(provider) = &self.recipe_provider {
+        let mut recipe = if let Some(provider) = &self.provider {
             provider.generate_recipe()?
         } else {
             Recipe::new()
@@ -181,6 +185,10 @@ impl Config {
         let _span = info_span!("generate_graph").entered();
         let mut graph = BuildGraph::new();
         let recipe = self.recipe()?;
+
+        // Track dependencies: (step_node, needs_targets)
+        let mut dependencies: Vec<(petgraph::graph::NodeIndex, Vec<String>)> = Vec::new();
+
         for (target, operation) in recipe {
             // First operation must be a source step
             let source = operation.0.first().ok_or_else(|| {
@@ -193,14 +201,39 @@ impl Config {
                     "First step for target '{target}' must be a source step"
                 )))
             }?;
-            let operations: Vec<(Option<String>, BuildStep)> = operation
+
+            let operations: Vec<(Option<String>, BuildStep, Vec<String>)> = operation
                 .0
                 .iter()
                 .skip(1)
                 .map(|step| step.to_operation())
                 .collect::<Result<Vec<_>, ApplicationError>>()?;
-            graph.add_path(source_filename, operations, &target);
+
+            // Extract needs from operations and prepare for add_path
+            let operations_for_path: Vec<(Option<String>, BuildStep)> = operations
+                .iter()
+                .map(|(input, op, _)| (input.clone(), op.clone()))
+                .collect();
+
+            // Add the path and get the nodes for each step
+            let step_nodes = graph.add_path(source_filename, operations_for_path, &target);
+
+            // Record dependencies with their corresponding nodes
+            for (step_idx, (_, _, needs)) in operations.iter().enumerate() {
+                if !needs.is_empty() && step_idx < step_nodes.len() {
+                    dependencies.push((step_nodes[step_idx], needs.clone()));
+                }
+            }
         }
+
+        // Now add dependency edges
+        for (target_node, needs) in dependencies {
+            for (slot, need_target) in needs.iter().enumerate() {
+                // Input slot starts at 1 because slot 0 is the primary input from the path
+                graph.add_dependency(need_target, target_node, slot + 1)?;
+            }
+        }
+
         Ok(graph)
     }
 }
@@ -210,25 +243,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_deserialize() {
+    fn test_deserialize_untagged_googlefonts() {
         let config = r#"
 sources:
     - "Nunito.glyphs"
 "#;
-        let deserialized_map: Config =
+        let deserialized: Config =
             serde_yaml_ng::from_str(config).expect("Failed to deserialize YAML");
-        assert_eq!(
-            deserialized_map,
-            Config {
-                recipe: HashMap::new(),
-                recipe_provider: Some(RecipeProvider::UntaggedGoogleFonts {
-                    options: GoogleFontsOptions {
-                        sources: vec!["Nunito.glyphs".to_string()],
-                        ..Default::default()
-                    }
-                })
-            }
-        );
+
+        // Verify provider was created (we can't inspect its type directly)
+        assert!(deserialized.provider.is_some());
+        assert!(deserialized.recipe.is_empty());
     }
 
     #[test]
@@ -238,56 +263,48 @@ recipeProvider: googlefonts
 sources:
     - "Nunito.glyphs"
 "#;
-        let deserialized_map: Config =
+        let deserialized: Config =
             serde_yaml_ng::from_str(config).expect("Failed to deserialize YAML");
-        assert_eq!(
-            deserialized_map,
-            Config {
-                recipe: HashMap::new(),
-                recipe_provider: Some(RecipeProvider::TaggedGoogleFonts {
-                    _recipe_provider: monostate::MustBe!("googlefonts"),
-                    options: GoogleFontsOptions {
-                        sources: vec!["Nunito.glyphs".to_string()],
-                        ..Default::default()
-                    }
-                })
-            }
-        );
+
+        // Verify provider was created
+        assert!(deserialized.provider.is_some());
+        assert!(deserialized.recipe.is_empty());
     }
 
     #[test]
     fn test_deserialize_explicit_recipe() {
-        let recipe = HashMap::from([(
-            "Nunito.designspace".to_string(),
-            ConfigOperation(vec![
-                Step::SourceStep {
-                    source: "Nunito.glyphs".to_string(),
-                    extra: HashMap::new(),
-                },
-                Step::OperationStep {
-                    operation: OpStep::Glyphs2UFO,
-                    extra: HashMap::new(),
-                    args: None,
-                    input_file: None,
-                },
-            ]),
-        )]);
-
         let config = r#"
 recipe:
     Nunito.designspace:
         - source: "Nunito.glyphs"
         - operation: "glyphs2ufo"
 "#;
-        let deserialized_map: Config =
+        let deserialized: Config =
             serde_yaml_ng::from_str(config).expect("Failed to deserialize YAML");
 
-        assert_eq!(
-            deserialized_map,
-            Config {
-                recipe,
-                recipe_provider: None
+        // When explicit recipe is provided, provider should be None
+        assert!(deserialized.provider.is_none());
+        assert_eq!(deserialized.recipe.len(), 1);
+        assert!(deserialized.recipe.contains_key("Nunito.designspace"));
+    }
+
+    #[test]
+    fn test_invalid_provider_options() {
+        // Test with a field that has the wrong type (sources should be array, not string)
+        let config = r#"
+recipeProvider: googlefonts
+sources: "NotAnArray"
+"#;
+        let result: Result<Config, _> = serde_yaml_ng::from_str(config);
+
+        // Should fail with clear error message about invalid options
+        match result {
+            Err(e) => {
+                let err_msg = format!("{}", e);
+                assert!(err_msg.contains("Failed to parse GoogleFonts provider options"),
+                    "Expected error message to contain 'Failed to parse GoogleFonts provider options', got: {}", err_msg);
             }
-        );
+            Ok(_) => panic!("Expected deserialization to fail, but it succeeded"),
+        }
     }
 }

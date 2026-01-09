@@ -2,12 +2,14 @@ use std::collections::HashMap;
 
 use crate::{
     buildsystem::Operation,
+    operations::{fix::FixConfig, fontc::FontcConfig},
     recipe::{ConfigOperation, Step},
 };
 use serde::{Deserialize, Serialize};
 
 pub mod buildstat;
 pub mod compress;
+pub mod convert;
 pub mod fix;
 pub mod fontc;
 pub mod glyphs2ufo;
@@ -34,7 +36,7 @@ impl OpStep {
     pub fn operation(&self) -> Box<dyn Operation> {
         match self {
             OpStep::Fix => Box::new(fix::Fix::new()),
-            OpStep::Fontc => Box::new(fontc::Fontc),
+            OpStep::Fontc => Box::new(fontc::Fontc::new()),
             OpStep::Glyphs2UFO => Box::new(glyphs2ufo::Glyphs2UFO),
             OpStep::BuildStat => Box::new(buildstat::BuildStat),
             OpStep::Compress => Box::new(compress::Compress),
@@ -63,22 +65,39 @@ impl ConfigOperationBuilder {
         self
     }
 
-    pub fn fix(mut self, extra: HashMap<String, serde_json::Value>) -> Self {
+    pub fn fix(mut self, config: &FixConfig) -> Self {
+        // Serialize FixConfig to a HashMap<String, serde_json::Value>
+        let extra = serde_json::to_value(config)
+            .unwrap_or(serde_json::Value::Object(serde_json::Map::new()))
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect::<HashMap<String, serde_json::Value>>();
         self.steps.push(Step::OperationStep {
             operation: OpStep::Fix,
             extra,
             args: None,
             input_file: None,
+            needs: vec![],
         });
         self
     }
 
-    pub fn compile(mut self, extra: HashMap<String, serde_json::Value>) -> Self {
+    pub fn compile(mut self, config: &FontcConfig) -> Self {
+        let extra = serde_json::to_value(config)
+            .unwrap_or(serde_json::Value::Object(serde_json::Map::new()))
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect::<HashMap<String, serde_json::Value>>();
         self.steps.push(Step::OperationStep {
             operation: OpStep::Fontc,
             extra,
             args: None,
             input_file: None,
+            needs: vec![],
         });
         self
     }
@@ -89,6 +108,18 @@ impl ConfigOperationBuilder {
             extra: HashMap::new(),
             args: None,
             input_file: None,
+            needs: vec![],
+        });
+        self
+    }
+
+    pub fn buildstat(mut self, others: &[String]) -> Self {
+        self.steps.push(Step::OperationStep {
+            operation: OpStep::BuildStat,
+            extra: HashMap::new(),
+            args: None,
+            input_file: None,
+            needs: others.to_vec(),
         });
         self
     }

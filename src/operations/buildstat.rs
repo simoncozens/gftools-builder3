@@ -1,7 +1,7 @@
 use std::{os::unix::process::ExitStatusExt, process::Output};
 
 use crate::{
-    buildsystem::{Operation, OperationOutput},
+    buildsystem::{DataKind, Operation, OperationOutput},
     error::ApplicationError,
 };
 use fontations::read::FontRef;
@@ -14,6 +14,15 @@ impl Operation for BuildStat {
     fn shortname(&self) -> &str {
         "BuildStat"
     }
+
+    fn input_kinds(&self) -> Vec<DataKind> {
+        vec![DataKind::Bytes]
+    }
+
+    fn output_kinds(&self) -> Vec<DataKind> {
+        vec![DataKind::Bytes]
+    }
+
     fn execute(
         &self,
         inputs: &[OperationOutput],
