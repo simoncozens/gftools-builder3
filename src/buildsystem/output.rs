@@ -1,4 +1,5 @@
 use babelfont::Font;
+use fontations::read::FontRef;
 use std::sync::{Arc, Mutex, MutexGuard};
 use tempfile::NamedTempFile;
 
@@ -38,7 +39,7 @@ pub enum RawOperationOutput {
     NamedFile(String),
     TemporaryFile(Option<NamedTempFile>),
     InMemoryBytes(Vec<u8>),
-    FontSource(babelfont::Font),
+    SourceFont(Box<babelfont::Font>),
 }
 
 impl PartialEq for RawOperationOutput {
@@ -49,7 +50,7 @@ impl PartialEq for RawOperationOutput {
                 a.as_ref().map(|f| f.path()) == b.as_ref().map(|f| f.path())
             }
             (RawOperationOutput::InMemoryBytes(a), RawOperationOutput::InMemoryBytes(b)) => a == b,
-            (RawOperationOutput::FontSource(a), RawOperationOutput::FontSource(b)) => {
+            (RawOperationOutput::SourceFont(a), RawOperationOutput::SourceFont(b)) => {
                 std::ptr::eq(a, b) // This is probably wrong and definitely evil.
             }
             _ => false,
@@ -71,7 +72,7 @@ impl From<&str> for RawOperationOutput {
 
 impl From<Font> for RawOperationOutput {
     fn from(font: Font) -> Self {
-        Self::FontSource(font)
+        Self::SourceFont(Box::new(font))
     }
 }
 
@@ -106,7 +107,7 @@ impl std::fmt::Display for OperationOutput {
             RawOperationOutput::NamedFile(name) => write!(f, "{name}"),
             RawOperationOutput::TemporaryFile(_) => write!(f, "<temporary file>"),
             RawOperationOutput::InMemoryBytes(_) => write!(f, "<in-memory bytes>"),
-            RawOperationOutput::FontSource(font) => write!(
+            RawOperationOutput::SourceFont(font) => write!(
                 f,
                 "<{} source>",
                 font.names
@@ -128,7 +129,7 @@ impl std::fmt::Debug for OperationOutput {
                 write!(f, "NamedTemporaryFile({})", x.path().to_string_lossy())
             }
             RawOperationOutput::InMemoryBytes(_) => write!(f, "InMemoryBytes"),
-            RawOperationOutput::FontSource(font) => {
+            RawOperationOutput::SourceFont(font) => {
                 write!(
                     f,
                     "FontSource({})",
@@ -177,7 +178,7 @@ impl OperationOutput {
                 *f = RawOperationOutput::TemporaryFile(Some(temp_file));
                 Ok(temp_path_string)
             }
-            RawOperationOutput::FontSource(font) => {
+            RawOperationOutput::SourceFont(font) => {
                 // Convert in-memory bytes to a temp file by writing it in Glyphs format
                 let temp_file = NamedTempFile::with_suffix(".glyphs")
                     .map_err(|e| ApplicationError::Other(e.to_string()))?;
@@ -234,7 +235,7 @@ impl OperationOutput {
                 "Temporary file is not set".to_string(),
             )),
             RawOperationOutput::InMemoryBytes(bytes) => Ok(bytes.clone()),
-            RawOperationOutput::FontSource(font) => {
+            RawOperationOutput::SourceFont(font) => {
                 // Convert in-memory bytes to a temp file by writing it in Glyphs format
                 // Unfortunately this currently requires a temp file on disk
                 let temp_file = self.to_filename()?;
@@ -257,5 +258,50 @@ impl OperationOutput {
         } else {
             self.set_bytes(bytes)
         }
+    }
+
+    /// Convert the OperationOutput to a babelfont Font object.
+    ///
+    /// Use this when you need to work with the font source data directly.
+    /// If the output is already a SourceFont, returns a clone of the font.
+    /// If the output is a named file or temporary file, loads the font from disk.
+    /// If the output is in-memory bytes, writes to a temp file and loads from there.
+    pub fn to_font_source(&self) -> Result<Box<babelfont::Font>, ApplicationError> {
+        let f = self.lock().map_err(|_| ApplicationError::MutexPoisoned)?;
+        match &*f {
+            RawOperationOutput::SourceFont(font) => Ok(font.clone()),
+            RawOperationOutput::NamedFile(name) => {
+                let font = babelfont::load(name).map_err(|e| {
+                    ApplicationError::Other(format!("Failed to load font '{}': {}", name, e))
+                })?;
+                Ok(Box::new(font))
+            }
+            RawOperationOutput::TemporaryFile(Some(temp_file)) => {
+                let path = temp_file.path().to_string_lossy().to_string();
+                let font = babelfont::load(&path).map_err(|e| {
+                    ApplicationError::Other(format!("Failed to load font from temp file: {}", e))
+                })?;
+                Ok(Box::new(font))
+            }
+            RawOperationOutput::TemporaryFile(None) => Err(ApplicationError::Other(
+                "Temporary file is not set".to_string(),
+            )),
+            RawOperationOutput::InMemoryBytes(_) => {
+                // Need to write to temp file first, then load
+                drop(f); // Release the lock before calling to_filename which needs it
+                let temp_filename = self.to_filename()?;
+                let font = babelfont::load(&temp_filename).map_err(|e| {
+                    ApplicationError::Other(format!("Failed to load font from bytes: {}", e))
+                })?;
+                Ok(Box::new(font))
+            }
+        }
+    }
+
+    /// Set the OperationOutput to contain a SourceFont.
+    pub fn set_font_source(&self, font: Box<babelfont::Font>) -> Result<(), ApplicationError> {
+        let mut f = self.lock().map_err(|_| ApplicationError::MutexPoisoned)?;
+        *f = RawOperationOutput::SourceFont(font);
+        Ok(())
     }
 }

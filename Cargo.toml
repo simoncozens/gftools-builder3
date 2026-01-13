@@ -42,12 +42,15 @@ tracing-appender = "0.2"
 
 layout-rs = { version = "0.1.3", optional = true }
 serde-inline-default = "1.0.0"
-babelfont = { git = "https://github.com/simoncozens/babelfont-rs", version = "0.2.0-pre" }
 fontdrasil = "0.4.0"
 ttf2woff2 = { version = "0.10.3", default-features = false }
 ascii-dag = "0.4.0"
 tracing-chrome = "0.7.2"
 clap-verbosity-flag = "3.0.4"
+#babelfont = { git = "https://github.com/simoncozens/babelfont-rs", version = "0.2.0-pre" }
+#fontmerge = { git = "https://github.com/simoncozens/fontmerge/", version = "0.1.0" }
+babelfont = { path = "../babelfont-rs" }
+fontmerge = { path = "../fontmerge" }
 
 [dev-dependencies]
 pretty_assertions = "1"

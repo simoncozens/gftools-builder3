@@ -7,6 +7,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 
+pub mod addsubset;
 pub mod buildstat;
 pub mod compress;
 pub mod convert;
@@ -29,6 +30,8 @@ pub(crate) enum OpStep {
     BuildStat,
     #[serde(rename = "compress")]
     Compress,
+    #[serde(rename = "addSubset")]
+    AddSubset,
 }
 
 impl OpStep {
@@ -40,6 +43,7 @@ impl OpStep {
             OpStep::Glyphs2UFO => Box::new(glyphs2ufo::Glyphs2UFO),
             OpStep::BuildStat => Box::new(buildstat::BuildStat),
             OpStep::Compress => Box::new(compress::Compress),
+            OpStep::AddSubset => Box::new(addsubset::AddSubset::new()),
         }
     }
 }

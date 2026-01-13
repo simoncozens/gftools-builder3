@@ -93,3 +93,44 @@ impl Operation for BytesToTempFile {
         true
     }
 }
+
+#[derive(PartialEq, Debug)]
+pub struct PathToSourceFont;
+
+#[async_trait]
+impl Operation for PathToSourceFont {
+    fn shortname(&self) -> &str {
+        "LoadSource"
+    }
+    fn description(&self) -> String {
+        "Load font source file".to_string()
+    }
+    fn input_kinds(&self) -> Vec<DataKind> {
+        vec![DataKind::Path]
+    }
+    fn output_kinds(&self) -> Vec<DataKind> {
+        vec![DataKind::SourceFont]
+    }
+    fn execute(
+        &self,
+        inputs: &[OperationOutput],
+        outputs: &[OperationOutput],
+    ) -> Result<Output, ApplicationError> {
+        let input = inputs
+            .first()
+            .ok_or_else(|| ApplicationError::WrongInputs("No input".into()))?;
+        let font = input.to_font_source()?;
+        outputs
+            .first()
+            .ok_or_else(|| ApplicationError::WrongOutputs("Missing output slot 0".into()))?
+            .set_font_source(font)?;
+        Ok(Output {
+            status: ExitStatus::from_raw(0),
+            stdout: vec![],
+            stderr: vec![],
+        })
+    }
+    fn hidden(&self) -> bool {
+        true
+    }
+}

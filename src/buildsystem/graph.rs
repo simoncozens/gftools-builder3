@@ -7,6 +7,7 @@ use crate::buildsystem::{
     Operation, OperationOutput, output::RawOperationOutput, sourcesink::SourceSink,
 };
 use crate::error::ApplicationError;
+use crate::operations::convert::{BytesToTempFile, FileToBytes, PathToSourceFont};
 
 pub type BuildStep = Arc<Box<dyn Operation>>;
 
@@ -69,7 +70,6 @@ impl BuildGraph {
         sink_filename: &str,
     ) -> Vec<NodeIndex> {
         use crate::buildsystem::operation::DataKind;
-        use crate::operations::convert::{BytesToTempFile, FileToBytes};
         let mut current_node = self.source;
         // Track the current data kind flowing out of current_node (slot 0)
         let mut current_kind: DataKind = DataKind::Path; // source produces paths
@@ -122,6 +122,9 @@ impl BuildGraph {
                     }
                     (DataKind::Bytes, DataKind::Path) => {
                         Some((Box::new(BytesToTempFile), DataKind::Path))
+                    }
+                    (DataKind::Path, DataKind::SourceFont) => {
+                        Some((Box::new(PathToSourceFont), DataKind::SourceFont))
                     }
                     _ => None,
                 };

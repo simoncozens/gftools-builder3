@@ -2,13 +2,13 @@ use serde_inline_default::serde_inline_default;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::process::Output;
-use std::{os::unix::process::ExitStatusExt, path::PathBuf, process::ExitStatus};
+use std::{os::unix::process::ExitStatusExt, process::ExitStatus};
 
 use crate::{
     buildsystem::{DataKind, Operation, OperationOutput},
     error::ApplicationError,
 };
-use fontc::{Flags, generate_font};
+use fontc::Flags;
 use serde::{Deserialize, Serialize};
 use tracing::info_span;
 
@@ -78,7 +78,7 @@ impl Operation for Fontc {
     }
 
     fn input_kinds(&self) -> Vec<DataKind> {
-        vec![DataKind::Path]
+        vec![DataKind::SourceFont]
     }
 
     fn output_kinds(&self) -> Vec<DataKind> {
@@ -91,16 +91,25 @@ impl Operation for Fontc {
         outputs: &[OperationOutput],
     ) -> Result<Output, ApplicationError> {
         let _span = info_span!("fontc").entered();
-        let input_file = inputs
+        let input_font = inputs
             .first()
             .ok_or_else(|| ApplicationError::WrongInputs("No input file provided".to_string()))?
-            .to_filename()?;
-        let input = fontc::Input::new(&PathBuf::from(input_file))
-            .map_err(|e| ApplicationError::Other(e.to_string()))?
-            .create_source()
-            .map_err(|e| ApplicationError::Other(e.to_string()))?;
-        let font = generate_font(input, self.fontc_options())
-            .map_err(|e| ApplicationError::Other(e.to_string()))?;
+            .to_font_source()?;
+
+        use babelfont::convertors::fontir::CompilationOptions;
+
+        let font = babelfont::convertors::fontir::BabelfontIrSource::compile(
+            *input_font,
+            CompilationOptions::default(),
+        )
+        .map_err(|e| ApplicationError::Other(e.to_string()))?;
+
+        // let input = fontc::Input::new(&PathBuf::from(input_file))
+        //     .map_err(|e| ApplicationError::Other(e.to_string()))?
+        //     .create_source()
+        //     .map_err(|e| ApplicationError::Other(e.to_string()))?;
+        // let font = generate_font(input, self.fontc_options())
+        //     .map_err(|e| ApplicationError::Other(e.to_string()))?;
         outputs[0].set_contents(font)?;
         Ok(Output {
             status: ExitStatus::from_raw(0),
