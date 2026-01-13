@@ -223,8 +223,8 @@ async fn run_op(
     );
 
     let description = format!(
-        "{}: {} -> {} ({})",
-        op.shortname(),
+        "{}: {} -> {}",
+        op.description(),
         inputs
             .iter()
             .map(|x| format!("{x}"))
@@ -235,7 +235,6 @@ async fn run_op(
             .map(|x| format!("{x}"))
             .collect::<Vec<_>>()
             .join(", "),
-        op.description()
     );
 
     let inner = async {

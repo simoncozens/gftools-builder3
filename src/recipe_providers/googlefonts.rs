@@ -344,6 +344,8 @@ impl GoogleFontsProvider {
             recipe.insert(webfont_target, webfont_builder.build());
         }
 
+        // Smallcaps go here
+
         recipe.insert(target, builder.build());
         Ok(recipe)
     }
