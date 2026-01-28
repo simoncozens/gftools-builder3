@@ -128,3 +128,9 @@ impl ConfigOperationBuilder {
         self
     }
 }
+
+impl Default for ConfigOperationBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}

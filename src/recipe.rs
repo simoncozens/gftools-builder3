@@ -21,15 +21,11 @@ use crate::{
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 enum RecipeProviderTag {
+    #[default]
     GoogleFonts,
     Noto,
-}
-
-impl Default for RecipeProviderTag {
-    fn default() -> Self {
-        RecipeProviderTag::GoogleFonts
-    }
 }
 
 pub(crate) trait Provider {
@@ -118,7 +114,7 @@ pub struct ConfigOperation(pub(crate) Vec<Step>);
 pub type Recipe = HashMap<String, ConfigOperation>;
 
 #[derive(Serialize)]
-pub(crate) struct Config {
+pub struct Config {
     #[serde(default)]
     recipe: Recipe,
     #[serde(skip)]
@@ -168,7 +164,7 @@ impl<'de> Deserialize<'de> for Config {
 }
 
 impl Config {
-    pub(crate) fn recipe(&self) -> Result<Recipe, ApplicationError> {
+    pub fn recipe(&self) -> Result<Recipe, ApplicationError> {
         let _span = info_span!("generate_recipe").entered();
 
         let mut recipe = if let Some(provider) = &self.provider {
@@ -181,7 +177,7 @@ impl Config {
         Ok(recipe)
     }
 
-    pub(crate) fn to_graph(&self) -> Result<BuildGraph, ApplicationError> {
+    pub fn to_graph(&self) -> Result<BuildGraph, ApplicationError> {
         let _span = info_span!("generate_graph").entered();
         let mut graph = BuildGraph::new();
         let recipe = self.recipe()?;

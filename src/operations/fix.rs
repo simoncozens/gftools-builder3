@@ -57,9 +57,9 @@ impl Operation for Fix {
         // Build command with base arguments
         let mut cmd_parts = vec![
             "gftools-fix-font".to_string(),
-            inputs[0].to_filename()?,
+            inputs[0].to_filename(None)?,
             "-o".to_string(),
-            outputs[0].to_filename()?,
+            outputs[0].to_filename(None)?,
         ];
 
         if self.config.include_source_fixes {

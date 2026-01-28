@@ -119,7 +119,7 @@ impl AddSubset {
                 .collect(),
             self.config.include_codepoints.clone(),
             font1,
-            &font2,
+            font2,
             self.config.existing_glyph_handling,
         )
     }
@@ -152,7 +152,7 @@ impl Operation for AddSubset {
             .get(1)
             .ok_or_else(|| ApplicationError::WrongInputs("No donor font".into()))?
             .to_font_source()?;
-        let filter = self.glyphset_filter(&mut *input_font, &*donor_font);
+        let filter = self.glyphset_filter(&mut input_font, &donor_font);
         let output_font = fontmerge(
             *input_font,
             *donor_font,

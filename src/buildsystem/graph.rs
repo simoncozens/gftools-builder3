@@ -1,13 +1,12 @@
-use std::fmt::Display;
-use std::sync::Arc;
+use std::{fmt::Display, sync::Arc};
 
 use petgraph::{Graph, graph::NodeIndex, visit::EdgeRef};
 
-use crate::buildsystem::{
-    Operation, OperationOutput, output::RawOperationOutput, sourcesink::SourceSink,
+use crate::{
+    buildsystem::{Operation, OperationOutput, output::RawOperationOutput, sourcesink::SourceSink},
+    error::ApplicationError,
+    operations::convert::{BytesToTempFile, FileToBytes, PathToSourceFont},
 };
-use crate::error::ApplicationError;
-use crate::operations::convert::{BytesToTempFile, FileToBytes, PathToSourceFont};
 
 pub type BuildStep = Arc<Box<dyn Operation>>;
 
@@ -191,10 +190,9 @@ impl BuildGraph {
                     .graph
                     .node_weight(existing_node)
                     .and_then(|op| op.output_kinds().first().cloned())
+                    && ok != DataKind::Any
                 {
-                    if ok != DataKind::Any {
-                        current_kind = ok;
-                    }
+                    current_kind = ok;
                 }
 
                 continue;
@@ -216,11 +214,10 @@ impl BuildGraph {
             if let Some(ok) = self
                 .graph
                 .node_weight(current_node)
-                .and_then(|op| op.output_kinds().get(0).cloned())
+                .and_then(|op| op.output_kinds().first().cloned())
+                && ok != DataKind::Any
             {
-                if ok != DataKind::Any {
-                    current_kind = ok;
-                }
+                current_kind = ok;
             }
         }
 
@@ -305,12 +302,12 @@ impl BuildGraph {
             .edges_directed(*producer_node, petgraph::Direction::Outgoing)
             .filter(|edge| {
                 // Check if this edge goes to a Sink node AND has the matching target output
-                if let Some(node_weight) = self.graph.node_weight(edge.target()) {
-                    if node_weight.shortname() == "Sink" {
-                        // Check if the output filename matches our target
-                        if let Ok(filename) = edge.weight().output.to_filename() {
-                            return filename == target_name;
-                        }
+                if let Some(node_weight) = self.graph.node_weight(edge.target())
+                    && node_weight.shortname() == "Sink"
+                {
+                    // Check if the output filename matches our target
+                    if let Ok(filename) = edge.weight().output.to_filename(None) {
+                        return filename == target_name;
                     }
                 }
                 false
@@ -341,7 +338,7 @@ impl BuildGraph {
         for edge in self.graph.raw_edges() {
             if edge.weight.output.is_named_file()
                 && let Some(parent) =
-                    std::path::Path::new(&edge.weight.output.to_filename()?).parent()
+                    std::path::Path::new(&edge.weight.output.to_filename(None)?).parent()
             {
                 std::fs::create_dir_all(parent).map_err(|e| {
                     ApplicationError::Other(format!(
@@ -403,5 +400,11 @@ impl BuildGraph {
         let dag = ascii_dag::DAG::from_edges(&nodes, &edges);
         let contents = dag.render();
         Ok(contents)
+    }
+}
+
+impl Default for BuildGraph {
+    fn default() -> Self {
+        Self::new()
     }
 }

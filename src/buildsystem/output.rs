@@ -151,7 +151,7 @@ impl OperationOutput {
     /// If the output is already a named file, returns that name.
     /// If the output is a temporary file, returns the temporary file name, creating the temp file if necessary.
     /// If the output is in-memory bytes, writes the bytes to a temporary file and returns the temp file name.
-    pub fn to_filename(&self) -> Result<String, ApplicationError> {
+    pub fn to_filename(&self, suffix: Option<&str>) -> Result<String, ApplicationError> {
         let mut f = self.lock().map_err(|_| ApplicationError::MutexPoisoned)?;
         match &mut *f {
             RawOperationOutput::NamedFile(name) => Ok(name.to_string()),
@@ -160,8 +160,12 @@ impl OperationOutput {
                 if let Some(temp_file) = x {
                     Ok(temp_file.path().to_string_lossy().to_string())
                 } else {
-                    let temp_file =
-                        NamedTempFile::new().map_err(|e| ApplicationError::Other(e.to_string()))?;
+                    let temp_file = if let Some(suffix) = suffix {
+                        NamedTempFile::with_suffix(suffix)
+                    } else {
+                        NamedTempFile::new()
+                    }
+                    .map_err(|e| ApplicationError::Other(e.to_string()))?;
                     *x = Some(temp_file);
                     Ok(x.as_ref().unwrap().path().to_string_lossy().to_string())
                 }
@@ -238,7 +242,7 @@ impl OperationOutput {
             RawOperationOutput::SourceFont(font) => {
                 // Convert in-memory bytes to a temp file by writing it in Glyphs format
                 // Unfortunately this currently requires a temp file on disk
-                let temp_file = self.to_filename()?;
+                let temp_file = self.to_filename(Some(".glyphs"))?;
                 // Noe read the bytes back
                 let buffer =
                     std::fs::read(temp_file).map_err(|e| ApplicationError::Other(e.to_string()))?;
@@ -253,7 +257,7 @@ impl OperationOutput {
     pub fn set_contents(&self, bytes: Vec<u8>) -> Result<(), ApplicationError> {
         if self.is_named_file() {
             // OK, we write it
-            let output_path = self.to_filename()?;
+            let output_path = self.to_filename(None)?;
             Ok(std::fs::write(output_path, bytes)?)
         } else {
             self.set_bytes(bytes)
@@ -289,7 +293,7 @@ impl OperationOutput {
             RawOperationOutput::InMemoryBytes(_) => {
                 // Need to write to temp file first, then load
                 drop(f); // Release the lock before calling to_filename which needs it
-                let temp_filename = self.to_filename()?;
+                let temp_filename = self.to_filename(None)?;
                 let font = babelfont::load(&temp_filename).map_err(|e| {
                     ApplicationError::Other(format!("Failed to load font from bytes: {}", e))
                 })?;

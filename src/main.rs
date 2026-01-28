@@ -1,12 +1,7 @@
-mod buildsystem;
-mod error;
-mod operations;
-mod recipe;
-mod recipe_providers;
-
+use gftools_builder::{BuildConfig, build};
 use tracing_chrome::ChromeLayerBuilder;
 
-use clap::{ArgAction, Parser};
+use clap::Parser;
 use std::{process::exit, time::Duration};
 use tokio::{
     io::{AsyncWriteExt, stderr},
@@ -37,7 +32,6 @@ struct Args {
 
 #[tokio::main]
 async fn main() {
-    let job_limit = num_cpus::get();
     let args = Args::parse();
     let mut _guard = None;
     if let Some(ref profile_file) = args.profile {
@@ -60,80 +54,20 @@ async fn main() {
     env_logger::Builder::new()
         .filter_level(args.verbosity.into())
         .init();
+
+    let job_limit = num_cpus::get();
     log::info!("Starting gftools-builder with {} parallel jobs", job_limit);
-    let config_yaml = std::fs::read_to_string(&args.config_file).unwrap_or_else(|e| {
-        log::error!("Could not read config file {}: {e}", args.config_file);
-        exit(1)
-    });
-    // Parse the YAML into a recipe config file
-    let config = serde_yaml_ng::from_str::<recipe::Config>(&config_yaml).unwrap_or_else(|e| {
-        log::error!("Could not parse config file {}: {e}", args.config_file);
-        exit(1)
-    });
 
-    // Change to the config file's directory
-    if let Some(config_dir) = std::path::Path::new(&args.config_file).parent() {
-        // If the config path has no parent (e.g. just "config.yaml"), stay in the current directory
-        if !config_dir.as_os_str().is_empty() {
-            std::env::set_current_dir(config_dir).unwrap_or_else(|e| {
-                log::error!(
-                    "Could not change directory to config file's directory {}: {}",
-                    config_dir.display(),
-                    e
-                );
-                exit(1)
-            });
-        }
-    }
+    let build_config = BuildConfig {
+        config_path: args.config_file.clone(),
+        job_limit,
+        generate_only: args.generate,
+        #[cfg(feature = "graphviz")]
+        draw_graph: args.graph,
+        ascii_graph: args.ascii_graph,
+    };
 
-    if args.generate {
-        let recipe = config.recipe().unwrap_or_else(|e| {
-            panic!(
-                "Could not convert config {} to recipe: {}",
-                args.config_file, e
-            )
-        });
-        let recipe_yaml = serde_yaml_ng::to_string(&recipe)
-            .unwrap_or_else(|_| panic!("Could not serialize recipe to YAML: {}", args.config_file));
-        println!("{recipe_yaml}");
-        return;
-    }
-    // Use the recipe to create a build graph
-    let g = config
-        .to_graph()
-        .unwrap_or_else(|_| panic!("Could not convert config to graph: {}", args.config_file));
-    g.ensure_directories().unwrap_or_else(|e| {
-        log::error!(
-            "Could not ensure directories for graph: {}: {}",
-            args.config_file,
-            e
-        );
-        exit(1)
-    });
-
-    #[cfg(feature = "graphviz")]
-    if args.graph {
-        let graph = g
-            .draw()
-            .unwrap_or_else(|_| panic!("Could not draw graph: {}", args.config_file));
-        std::fs::write("graph.svg", graph)
-            .unwrap_or_else(|_| panic!("Could not write graph to file: graph.svg"));
-        println!(
-            "Wrote build graph to {}/graph.svg",
-            std::env::current_dir().unwrap().display()
-        );
-        return;
-    }
-
-    if args.ascii_graph {
-        let graph = g
-            .ascii()
-            .unwrap_or_else(|_| panic!("Could not create ASCII graph: {}", args.config_file));
-        println!("{graph}");
-        return;
-    }
-
-    if let Err(error) = buildsystem::run(g, job_limit).await {
+    if let Err(error) = build(build_config).await {
         stderr()
             .write_all(format!("{error}\n").as_bytes())
             .await

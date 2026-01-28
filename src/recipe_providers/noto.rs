@@ -4,9 +4,10 @@ use std::collections::HashMap;
 
 use crate::{
     error::ApplicationError,
-    recipe::{Config, Provider, Recipe},
+    recipe::{Provider, Recipe},
 };
 
+#[allow(dead_code)] // We haven't implemented all functionality yet
 pub struct NotoProvider(pub NotoFontsOptions);
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]

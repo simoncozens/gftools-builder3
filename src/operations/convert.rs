@@ -1,11 +1,14 @@
-use std::os::unix::process::ExitStatusExt as _;
-use std::process::{ExitStatus, Output};
+use std::{
+    os::unix::process::ExitStatusExt as _,
+    process::{ExitStatus, Output},
+};
 
 use async_trait::async_trait;
 
-use crate::buildsystem::DataKind;
-use crate::buildsystem::{Operation, OperationOutput};
-use crate::error::ApplicationError;
+use crate::{
+    buildsystem::{DataKind, Operation, OperationOutput},
+    error::ApplicationError,
+};
 
 #[derive(PartialEq, Debug)]
 pub struct FileToBytes;
@@ -79,7 +82,7 @@ impl Operation for BytesToTempFile {
             .ok_or_else(|| ApplicationError::WrongOutputs("Missing output slot 0".into()))?;
 
         // Force the output to create/get a temp file and write the bytes to it
-        let temp_filename = out.to_filename()?;
+        let temp_filename = out.to_filename(Some(".glyphs"))?;
         std::fs::write(&temp_filename, &bytes)
             .map_err(|e| ApplicationError::Other(format!("Failed to write temp file: {}", e)))?;
 

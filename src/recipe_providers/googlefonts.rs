@@ -16,6 +16,7 @@ enum Style {
     Italic,
 }
 
+#[allow(clippy::upper_case_acronyms, dead_code)]
 #[derive(PartialEq, Debug, Clone, Copy)]
 enum FontFormat {
     TTF,
@@ -46,7 +47,7 @@ pub struct GoogleFontsOptions {
     pub extra: HashMap<String, Value>,
 
     // Path-related options
-    #[serde_inline_default(".".to_string())]
+    #[serde_inline_default("../fonts/".to_string())]
     pub output_dir: String,
 
     #[serde_inline_default("$outputDir/variable".to_string())]
@@ -58,7 +59,7 @@ pub struct GoogleFontsOptions {
     #[serde_inline_default("$outputDir/otf".to_string())]
     pub ot_dir: String,
 
-    #[serde_inline_default("$outputDir/woff".to_string())]
+    #[serde_inline_default("$outputDir/webfonts".to_string())]
     pub woff_dir: String,
 
     #[serde(default)]
@@ -162,6 +163,7 @@ impl GoogleFontsOptions {
         Ok(format!("{directory}/{sourcebase}[{axis_tags}].{extension}"))
     }
 
+    #[allow(dead_code)]
     pub fn static_filename(
         &self,
         instance_filename: &str,
@@ -236,7 +238,7 @@ impl GoogleFontsProvider {
         if !self.options.build_variable {
             return Ok(());
         }
-        let mut new_recipes = self
+        let new_recipes = self
             .sources
             .iter()
             .filter(|source| source.masters.len() >= 2)
