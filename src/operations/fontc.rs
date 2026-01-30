@@ -123,6 +123,6 @@ impl Operation for Fontc {
     }
 
     fn description(&self) -> String {
-        "Build a variable font".to_string()
+        "Compile font".to_string()
     }
 }

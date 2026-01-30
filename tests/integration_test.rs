@@ -27,7 +27,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn test_radio_canada_build() {
     // Set up logging for the test
@@ -121,7 +121,7 @@ async fn test_radio_canada_build() {
     let _ = std::env::set_current_dir(&original_dir);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn test_radio_canada_generate_recipe() {
     // Set up logging for the test
@@ -165,7 +165,7 @@ async fn test_radio_canada_generate_recipe() {
     // We can't easily capture stdout in this test, but at least we verify it doesn't crash
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn test_radio_canada_ascii_graph() {
     // Set up logging for the test

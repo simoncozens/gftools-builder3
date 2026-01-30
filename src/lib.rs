@@ -9,6 +9,8 @@ use error::ApplicationError;
 use recipe::Config;
 use std::path::{Path, PathBuf};
 
+use crate::recipe::Recipe;
+
 /// Configuration for building fonts
 pub struct BuildConfig {
     /// Path to the config file
@@ -80,15 +82,15 @@ pub fn generate_recipe(config: &Config) -> Result<String, ApplicationError> {
 }
 
 /// Generate an ASCII graph of the build process
-pub fn generate_ascii_graph(config: &Config) -> Result<String, ApplicationError> {
-    let graph = config.to_graph()?;
+pub fn generate_ascii_graph(recipe: &Recipe) -> Result<String, ApplicationError> {
+    let graph = recipe.to_graph()?;
     graph.ascii()
 }
 
 /// Generate an SVG graph of the build process
 #[cfg(feature = "graphviz")]
-pub fn generate_svg_graph(config: &Config) -> Result<String, ApplicationError> {
-    let graph = config.to_graph()?;
+pub fn generate_svg_graph(recipe: &Recipe) -> Result<String, ApplicationError> {
+    let graph = recipe.to_graph()?;
     graph.draw()
 }
 
@@ -102,15 +104,23 @@ pub async fn build(config: BuildConfig) -> Result<(), ApplicationError> {
     // Change to the config file's directory
     change_to_config_dir(&config.config_path)?;
 
+    // Use block_in_place to run the blocking recipe generation.
+    // This tells tokio to park the current task and use another thread from the pool.
+    // This avoids the "Cannot drop a runtime" panic that occurs when reqwest::blocking
+    // creates/drops a runtime inside an async context.
+    let recipe = tokio::task::block_in_place(|| config_yaml.recipe())?;
+
     if config.generate_only {
-        let recipe = generate_recipe(&config_yaml)?;
-        println!("{recipe}");
+        let serialized_recipe = serde_yaml_ng::to_string(&recipe).map_err(|e| {
+            ApplicationError::InvalidRecipe(format!("Could not serialize recipe to YAML: {}", e))
+        })?;
+        println!("{serialized_recipe}");
         return Ok(());
     }
 
     #[cfg(feature = "graphviz")]
     if config.draw_graph {
-        let graph = generate_svg_graph(&config_yaml)?;
+        let graph = generate_svg_graph(&recipe)?;
         std::fs::write("graph.svg", graph).map_err(|e| {
             ApplicationError::InvalidRecipe(format!("Could not write graph to file: {}", e))
         })?;
@@ -122,13 +132,13 @@ pub async fn build(config: BuildConfig) -> Result<(), ApplicationError> {
     }
 
     if config.ascii_graph {
-        let graph = generate_ascii_graph(&config_yaml)?;
+        let graph = generate_ascii_graph(&recipe)?;
         println!("{graph}");
         return Ok(());
     }
 
     // Use the config to create a build graph
-    let graph = config_yaml.to_graph()?;
+    let graph = recipe.to_graph()?;
     graph.ensure_directories()?;
 
     // Run the build

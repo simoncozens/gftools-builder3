@@ -1,4 +1,5 @@
-use babelfont::{Font, UserCoord};
+use crate::recipe_providers::includesubsets::IncludeSubsetsOptions;
+use babelfont::{Font, Instance, UserCoord};
 use serde::{Deserialize, Serialize};
 use serde_inline_default::serde_inline_default;
 use serde_json::Value;
@@ -6,7 +7,9 @@ use std::{collections::HashMap, path::Path};
 
 use crate::{
     error::ApplicationError,
-    operations::{ConfigOperationBuilder, fix::FixConfig, fontc::FontcConfig},
+    operations::{
+        ConfigOperationBuilder, addsubset::AddSubsetConfig, fix::FixConfig, fontc::FontcConfig,
+    },
     recipe::{Provider, Recipe},
 };
 
@@ -87,6 +90,10 @@ pub struct GoogleFontsOptions {
     // Fontc arguments
     #[serde(flatten, default)]
     pub fontc_config: FontcConfig,
+
+    // Options for adding subsets
+    #[serde(default)]
+    pub include_subsets: Vec<IncludeSubsetsOptions>,
 }
 
 impl Default for GoogleFontsOptions {
@@ -166,7 +173,7 @@ impl GoogleFontsOptions {
     #[allow(dead_code)]
     pub fn static_filename(
         &self,
-        instance_filename: &str,
+        instancebase: &str,
         suffix: Option<&str>,
         extension: Option<&str>,
     ) -> String {
@@ -180,10 +187,7 @@ impl GoogleFontsOptions {
             _ => self.tt_dir(),
         };
 
-        let mut instancebase = Path::new(instance_filename)
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| instance_filename.to_string());
+        let mut instancebase = instancebase.to_string();
 
         if !suffix.is_empty() {
             if let Some((familyname, style)) = instancebase.rsplit_once('-') {
@@ -225,12 +229,14 @@ impl Provider for GoogleFontsProvider {
 impl GoogleFontsProvider {
     fn load_all_sources(&mut self) -> Result<(), ApplicationError> {
         for source in &self.options.sources {
+            log::debug!("Loading source font: {}", source);
             let font = babelfont::load(source).map_err(|e| {
                 ApplicationError::InvalidRecipe(format!("Failed to load source {source}: {e}"))
             })?;
             self.sources.push(font);
         }
         self.build_all_variables()?;
+        self.build_all_statics()?;
         Ok(())
     }
 
@@ -254,7 +260,7 @@ impl GoogleFontsProvider {
                 }
             })
             .collect::<Result<Vec<Recipe>, ApplicationError>>()?;
-        let mut flat_recipes = HashMap::new();
+        let mut flat_recipes = Recipe::new();
         for recipe in new_recipes {
             flat_recipes.extend(recipe.clone());
         }
@@ -262,6 +268,7 @@ impl GoogleFontsProvider {
         if !flat_recipes.is_empty() {
             // Find a TTF target (not woff2) to add the BuildStat step to
             let first_ttf_target = flat_recipes
+                .0
                 .keys()
                 .find(|k| !k.ends_with(".woff2"))
                 .cloned();
@@ -269,13 +276,14 @@ impl GoogleFontsProvider {
             if let Some(first_target) = first_ttf_target {
                 // Collect other TTF targets as dependencies (skip the first one we're adding to)
                 let other_targets: Vec<String> = flat_recipes
+                    .0
                     .keys()
                     .filter(|k| !k.ends_with(".woff2") && *k != &first_target)
                     .cloned()
                     .collect();
 
                 // Add BuildStat to the first TTF recipe
-                if let Some(recipe) = flat_recipes.get_mut(&first_target) {
+                if let Some(recipe) = flat_recipes.0.get_mut(&first_target) {
                     recipe.0.push(crate::recipe::Step::OperationStep {
                         operation: crate::operations::OpStep::BuildStat,
                         needs: other_targets,
@@ -290,6 +298,87 @@ impl GoogleFontsProvider {
         // Do avar2
         self.recipe.extend(flat_recipes);
         Ok(())
+    }
+
+    fn build_all_statics(&mut self) -> Result<(), ApplicationError> {
+        if !self.options.build_static {
+            return Ok(());
+        }
+        for source in self.sources.iter() {
+            for instance in source.instances.iter() {
+                let recipe = self.build_a_static(source, instance, FontFormat::TTF)?;
+                self.recipe.extend(recipe);
+            }
+        }
+        Ok(())
+    }
+
+    fn build_a_static(
+        &self,
+        source: &Font,
+        instance: &Instance,
+        format: FontFormat,
+    ) -> Result<Recipe, ApplicationError> {
+        log::debug!(
+            "Considering how to build static font for {} instance {:?}",
+            source
+                .names
+                .family_name
+                .get_default()
+                .unwrap_or(&"Unknown family".to_string()),
+            instance.location
+        );
+        let instance_base = format!(
+            "{}-{}",
+            source
+                .names
+                .family_name
+                .get_default()
+                .unwrap_or(&"Unknown".to_string()),
+            instance
+                .name
+                .get_default()
+                .unwrap_or(&"Regular".to_string())
+        )
+        .replace(" ", "");
+        let mut recipe = Recipe::new();
+        let target = self.options.static_filename(
+            &instance_base,
+            self.options.filename_suffix.as_deref(),
+            Some(format.extension()),
+        );
+        log::debug!("Static target filename: {}", target);
+        let mut builder = ConfigOperationBuilder::new();
+        builder = builder.source(
+            source
+                .source
+                .as_ref()
+                .unwrap()
+                .to_string_lossy()
+                .to_string(),
+        );
+        builder = self.add_subset_steps(builder)?;
+        builder = builder.compile(&self.options.fontc_config);
+        if source.masters.len() > 1 {
+            builder = builder.instance(&instance.location);
+        }
+        // Autohint steps
+        // VTT steps
+        builder = builder.fix(&self.options.fix_config);
+
+        if self.options.build_webfont && format == FontFormat::TTF {
+            let webfont_target = self.options.static_filename(
+                &instance_base,
+                self.options.filename_suffix.as_deref(),
+                Some("woff2"),
+            );
+            log::debug!(" Building webfont target: {}", webfont_target);
+            let webfont_builder = builder.clone().compress();
+            recipe.insert(webfont_target, webfont_builder.build());
+        }
+
+        recipe.insert(target, builder.build());
+        Ok(recipe)
     }
 
     fn build_a_variable(
@@ -325,6 +414,7 @@ impl GoogleFontsProvider {
                 .to_string_lossy()
                 .to_string(),
         );
+        builder = self.add_subset_steps(builder)?;
         // Subset steps here
         builder = builder.compile(&self.options.fontc_config);
         // Any post-compile steps
@@ -370,5 +460,30 @@ impl GoogleFontsProvider {
         }
 
         None
+    }
+
+    fn add_subset_steps(
+        &self,
+        mut builder: ConfigOperationBuilder,
+    ) -> Result<ConfigOperationBuilder, ApplicationError> {
+        for subset_options in &self.options.include_subsets {
+            let donor_font = subset_options.obtain_donor_font()?;
+            let codepoints = subset_options.subset.resolve()?;
+            builder = builder.add_subset(
+                &AddSubsetConfig {
+                    include_glyphs: vec![],
+                    exclude_glyphs: vec![],
+                    include_codepoints: codepoints,
+                    existing_glyph_handling: if subset_options.force {
+                        fontmerge::ExistingGlyphHandling::Replace
+                    } else {
+                        fontmerge::ExistingGlyphHandling::Skip
+                    },
+                    layout_handling: subset_options.layout_handling,
+                },
+                &donor_font,
+            )
+        }
+        Ok(builder)
     }
 }

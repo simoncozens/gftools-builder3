@@ -1,4 +1,4 @@
-use std::{os::unix::process::ExitStatusExt, process::Output};
+use std::{collections::HashMap, os::unix::process::ExitStatusExt, process::Output};
 
 use crate::{
     buildsystem::{DataKind, Operation, OperationOutput},
@@ -7,12 +7,13 @@ use crate::{
 use babelfont::Font;
 use fontmerge::fontmerge;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct AddSubsetConfig {
     pub include_glyphs: Vec<String>,
     pub exclude_glyphs: Vec<String>,
-    pub include_codepoints: Vec<char>,
+    pub include_codepoints: Vec<u32>,
     #[serde(
         default,
         serialize_with = "existing_glyph_handling_ser",
@@ -46,8 +47,8 @@ fn existing_glyph_handling_deser<'de, D>(
 where
     D: serde::Deserializer<'de>,
 {
-    let s: &str = serde::Deserialize::deserialize(deserializer)?;
-    match s {
+    let s: String = serde::Deserialize::deserialize(deserializer)?;
+    match s.as_str() {
         "skip" => Ok(fontmerge::ExistingGlyphHandling::Skip),
         "replace" => Ok(fontmerge::ExistingGlyphHandling::Replace),
         _ => Err(serde::de::Error::custom(format!(
@@ -57,7 +58,7 @@ where
     }
 }
 
-fn layout_handling_ser<S>(
+pub(crate) fn layout_handling_ser<S>(
     layout_handling: &fontmerge::LayoutHandling,
     serializer: S,
 ) -> Result<S::Ok, S::Error>
@@ -71,12 +72,14 @@ where
     })
 }
 
-fn layout_handling_deser<'de, D>(deserializer: D) -> Result<fontmerge::LayoutHandling, D::Error>
+pub(crate) fn layout_handling_deser<'de, D>(
+    deserializer: D,
+) -> Result<fontmerge::LayoutHandling, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    let s: &str = serde::Deserialize::deserialize(deserializer)?;
-    match s {
+    let s: String = serde::Deserialize::deserialize(deserializer)?;
+    match s.as_str() {
         "subset" => Ok(fontmerge::LayoutHandling::Subset),
         "closure" => Ok(fontmerge::LayoutHandling::Closure),
         "ignore" => Ok(fontmerge::LayoutHandling::Ignore),
@@ -117,7 +120,11 @@ impl AddSubset {
                 .iter()
                 .map(|x| x.into())
                 .collect(),
-            self.config.include_codepoints.clone(),
+            self.config
+                .include_codepoints
+                .iter()
+                .flat_map(|&x| char::from_u32(x))
+                .collect(),
             font1,
             font2,
             self.config.existing_glyph_handling,
@@ -170,5 +177,14 @@ impl Operation for AddSubset {
 
     fn description(&self) -> String {
         "Merge subset into font".to_string()
+    }
+
+    fn set_extra(&mut self, extra: HashMap<String, Value>) {
+        // Deserialize the extra map into our typed config
+        let value = Value::Object(extra.into_iter().collect());
+        self.config = serde_json::from_value(value).unwrap_or_else(|e| {
+            log::warn!("Failed to deserialize config: {}. Using defaults.", e);
+            AddSubsetConfig::default()
+        });
     }
 }

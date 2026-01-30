@@ -152,12 +152,25 @@ async fn spawn_build(context: Arc<Context>, index: NodeIndex) -> Result<(), Appl
             let mut futures = vec![];
 
             // Make sure we have all our dependencies. (in-edges of this index)
-            let in_edges = context
+            let in_edges: Vec<_> = context
                 .configuration
                 .graph()
-                .edges_directed(index, Direction::Incoming);
-            let mut input_files = vec![];
-                        // Collect outputs by slot. Multiple edges may reference the same slot (broadcasting).
+                .edges_directed(index, Direction::Incoming)
+                .collect();
+            
+            // Collect inputs by slot, similar to how we handle outputs
+            let max_input_slot = in_edges.iter().map(|e| e.weight().output_slot).max().unwrap_or(0);
+            let mut input_files = vec![None; max_input_slot + 1];
+            for edge in &in_edges {
+                let slot = edge.weight().output_slot;
+                if input_files[slot].is_none() {
+                    input_files[slot] = Some(edge.weight().output.clone());
+                }
+            }
+            // Convert to non-Option vec (all slots should be filled)
+            let input_files: Vec<OperationOutput> = input_files.into_iter().flatten().collect();
+            
+            // Collect outputs by slot. Multiple edges may reference the same slot (broadcasting).
             // We need to build a Vec where outputs[slot] contains the OperationOutput for that slot.
             let out_edges: Vec<_> = context
                 .configuration
@@ -177,9 +190,10 @@ async fn spawn_build(context: Arc<Context>, index: NodeIndex) -> Result<(), Appl
 
             // Convert to non-Option vec (all slots should be filled)
             let output_files: Vec<OperationOutput> = output_files.into_iter().flatten().collect();
-            for input_dependency in in_edges {
-                futures.push(build_input(context.clone(), input_dependency.source()).await?);
-                input_files.push(input_dependency.weight().output.clone());
+            
+            // Build all input dependencies
+            for edge in &in_edges {
+                futures.push(build_input(context.clone(), edge.source()).await?);
             }
             try_join_all(futures).await?;
 

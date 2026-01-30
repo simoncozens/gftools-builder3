@@ -24,6 +24,8 @@ pub enum ApplicationError {
     FontReadError(String),
     #[error("Webfont compression error: {0}")]
     CompressionError(String),
+    #[error("Error including a subset font: {0}")]
+    IncludeSubsetsError(String),
 }
 
 impl From<Box<dyn Error>> for ApplicationError {

@@ -1,9 +1,7 @@
-use crate::buildsystem::OperationOutput;
-use crate::error::ApplicationError;
+use crate::{buildsystem::OperationOutput, error::ApplicationError};
 use async_trait::async_trait;
 use serde_json::Value;
-use std::collections::HashMap;
-use std::process::Output;
+use std::{collections::HashMap, process::Output};
 
 /// Logical data kind that operations consume/produce
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

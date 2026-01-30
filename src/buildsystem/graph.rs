@@ -272,7 +272,20 @@ impl BuildGraph {
         dependent_node: NodeIndex,
         input_slot: usize,
     ) -> Result<(), ApplicationError> {
-        let producer_node = self.target_nodes.get(target_name).ok_or_else(|| {
+        let maybe_node = self.target_nodes.get(target_name);
+        if maybe_node.is_none() && std::path::Path::new(target_name).exists() {
+            // For existing files, we don't need a producer. Just add a source node for it
+            let source_node = self.graph.add_node(Arc::new(Box::new(SourceSink::Source)));
+            let edge = BuildEdge {
+                output: RawOperationOutput::from(target_name).into(),
+                output_slot: input_slot,
+            };
+            self.graph.update_edge(source_node, dependent_node, edge);
+            self.target_nodes
+                .insert(target_name.to_string(), source_node);
+            return Ok(());
+        }
+        let producer_node = maybe_node.ok_or_else(|| {
             ApplicationError::InvalidRecipe(format!(
                 "Dependency target '{}' not found. Make sure it appears in the recipe before it's referenced.",
                 target_name

@@ -2,9 +2,10 @@ use std::collections::HashMap;
 
 use crate::{
     buildsystem::Operation,
-    operations::{fix::FixConfig, fontc::FontcConfig},
+    operations::{addsubset::AddSubsetConfig, fix::FixConfig, fontc::FontcConfig},
     recipe::{ConfigOperation, Step},
 };
+use babelfont::DesignLocation;
 use serde::{Deserialize, Serialize};
 
 pub mod addsubset;
@@ -88,14 +89,21 @@ impl ConfigOperationBuilder {
         self
     }
 
-    pub fn compile(mut self, config: &FontcConfig) -> Self {
-        let extra = serde_json::to_value(config)
+    fn to_extra<T>(config: &T) -> HashMap<String, serde_json::Value>
+    where
+        T: Serialize,
+    {
+        serde_json::to_value(config)
             .unwrap_or(serde_json::Value::Object(serde_json::Map::new()))
             .as_object()
             .unwrap()
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
-            .collect::<HashMap<String, serde_json::Value>>();
+            .collect::<HashMap<String, serde_json::Value>>()
+    }
+
+    pub fn compile(mut self, config: &FontcConfig) -> Self {
+        let extra = Self::to_extra(config);
         self.steps.push(Step::OperationStep {
             operation: OpStep::Fontc,
             extra,
@@ -126,6 +134,23 @@ impl ConfigOperationBuilder {
             needs: others.to_vec(),
         });
         self
+    }
+
+    pub fn add_subset(mut self, config: &AddSubsetConfig, donor: &str) -> Self {
+        let extra = Self::to_extra(config);
+        self.steps.push(Step::OperationStep {
+            operation: OpStep::AddSubset,
+            extra,
+            args: None,
+            input_file: None,
+            needs: vec![donor.to_string()],
+        });
+        self
+    }
+
+    pub fn instance(self, _location: &DesignLocation) -> Self {
+        panic!("We can't instance things in Rust yet");
+        // self
     }
 }
 

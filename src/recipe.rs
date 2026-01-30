@@ -111,7 +111,85 @@ impl Step {
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct ConfigOperation(pub(crate) Vec<Step>);
 
-pub type Recipe = HashMap<String, ConfigOperation>;
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Default)]
+pub struct Recipe(pub HashMap<String, ConfigOperation>);
+
+impl Recipe {
+    pub fn new() -> Self {
+        Recipe(HashMap::new())
+    }
+    pub fn extend(&mut self, other: Recipe) {
+        for (key, value) in other.0 {
+            self.0.insert(key, value);
+        }
+    }
+    pub fn insert(&mut self, key: String, value: ConfigOperation) {
+        self.0.insert(key, value);
+    }
+    pub fn contains_key(&self, key: &str) -> bool {
+        self.0.contains_key(key)
+    }
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+    pub fn to_graph(&self) -> Result<BuildGraph, ApplicationError> {
+        let _span = info_span!("generate_graph").entered();
+        let mut graph = BuildGraph::new();
+
+        // Track dependencies: (step_node, needs_targets)
+        let mut dependencies: Vec<(petgraph::graph::NodeIndex, Vec<String>)> = Vec::new();
+
+        for (target, operation) in self.0.iter() {
+            // First operation must be a source step
+            let source = operation.0.first().ok_or_else(|| {
+                ApplicationError::InvalidRecipe(format!("No steps found for target '{target}'"))
+            })?;
+            let source_filename = if let Step::SourceStep { source, .. } = source {
+                Ok(source)
+            } else {
+                Err(ApplicationError::InvalidRecipe(format!(
+                    "First step for target '{target}' must be a source step"
+                )))
+            }?;
+
+            let operations: Vec<(Option<String>, BuildStep, Vec<String>)> = operation
+                .0
+                .iter()
+                .skip(1)
+                .map(|step| step.to_operation())
+                .collect::<Result<Vec<_>, ApplicationError>>()?;
+
+            // Extract needs from operations and prepare for add_path
+            let operations_for_path: Vec<(Option<String>, BuildStep)> = operations
+                .iter()
+                .map(|(input, op, _)| (input.clone(), op.clone()))
+                .collect();
+
+            // Add the path and get the nodes for each step
+            let step_nodes = graph.add_path(source_filename, operations_for_path, &target);
+
+            // Record dependencies with their corresponding nodes
+            for (step_idx, (_, _, needs)) in operations.iter().enumerate() {
+                if !needs.is_empty() && step_idx < step_nodes.len() {
+                    dependencies.push((step_nodes[step_idx], needs.clone()));
+                }
+            }
+        }
+
+        // Now add dependency edges
+        for (target_node, needs) in dependencies {
+            for (slot, need_target) in needs.iter().enumerate() {
+                // Input slot starts at 1 because slot 0 is the primary input from the path
+                graph.add_dependency(need_target, target_node, slot + 1)?;
+            }
+        }
+
+        Ok(graph)
+    }
+}
 
 #[derive(Serialize)]
 pub struct Config {
@@ -175,62 +253,6 @@ impl Config {
         // If the user provided a recipe in the config, overlay it on top.
         recipe.extend(self.recipe.clone());
         Ok(recipe)
-    }
-
-    pub fn to_graph(&self) -> Result<BuildGraph, ApplicationError> {
-        let _span = info_span!("generate_graph").entered();
-        let mut graph = BuildGraph::new();
-        let recipe = self.recipe()?;
-
-        // Track dependencies: (step_node, needs_targets)
-        let mut dependencies: Vec<(petgraph::graph::NodeIndex, Vec<String>)> = Vec::new();
-
-        for (target, operation) in recipe {
-            // First operation must be a source step
-            let source = operation.0.first().ok_or_else(|| {
-                ApplicationError::InvalidRecipe(format!("No steps found for target '{target}'"))
-            })?;
-            let source_filename = if let Step::SourceStep { source, .. } = source {
-                Ok(source)
-            } else {
-                Err(ApplicationError::InvalidRecipe(format!(
-                    "First step for target '{target}' must be a source step"
-                )))
-            }?;
-
-            let operations: Vec<(Option<String>, BuildStep, Vec<String>)> = operation
-                .0
-                .iter()
-                .skip(1)
-                .map(|step| step.to_operation())
-                .collect::<Result<Vec<_>, ApplicationError>>()?;
-
-            // Extract needs from operations and prepare for add_path
-            let operations_for_path: Vec<(Option<String>, BuildStep)> = operations
-                .iter()
-                .map(|(input, op, _)| (input.clone(), op.clone()))
-                .collect();
-
-            // Add the path and get the nodes for each step
-            let step_nodes = graph.add_path(source_filename, operations_for_path, &target);
-
-            // Record dependencies with their corresponding nodes
-            for (step_idx, (_, _, needs)) in operations.iter().enumerate() {
-                if !needs.is_empty() && step_idx < step_nodes.len() {
-                    dependencies.push((step_nodes[step_idx], needs.clone()));
-                }
-            }
-        }
-
-        // Now add dependency edges
-        for (target_node, needs) in dependencies {
-            for (slot, need_target) in needs.iter().enumerate() {
-                // Input slot starts at 1 because slot 0 is the primary input from the path
-                graph.add_dependency(need_target, target_node, slot + 1)?;
-            }
-        }
-
-        Ok(graph)
     }
 }
 
