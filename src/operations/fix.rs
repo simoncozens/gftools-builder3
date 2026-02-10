@@ -1,12 +1,13 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::{collections::HashMap, os::unix::process::ExitStatusExt};
 use tracing::info_span;
 
 use crate::{
     buildsystem::{DataKind, Operation, OperationOutput},
     error::ApplicationError,
 };
+use gftools::fix_font;
 use std::process::Output;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -14,9 +15,8 @@ use std::process::Output;
 pub struct FixConfig {
     #[serde(default)]
     pub include_source_fixes: bool,
-
-    #[serde(default)]
-    pub fvar_instance_axis_dflts: HashMap<String, f32>,
+    // #[serde(default)]
+    // pub fvar_instance_axis_dflts: HashMap<String, f32>,
 }
 
 #[derive(PartialEq, Debug)]
@@ -54,28 +54,21 @@ impl Operation for Fix {
     ) -> Result<Output, ApplicationError> {
         let _span = info_span!("gftools-fix-font").entered();
 
-        // Build command with base arguments
-        let mut cmd_parts = vec![
-            "gftools-fix-font".to_string(),
-            inputs[0].to_filename(None)?,
-            "-o".to_string(),
-            outputs[0].to_filename(None)?,
-        ];
-
-        if self.config.include_source_fixes {
-            cmd_parts.push("--include-source-fixes".to_string());
+        match fix_font(
+            &inputs[0].to_filename(None)?,
+            &outputs[0].to_filename(None)?,
+            self.config.include_source_fixes,
+        ) {
+            Ok(()) => Ok(Output {
+                status: std::process::ExitStatus::from_raw(0),
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            }),
+            Err(e) => Err(ApplicationError::Other(format!(
+                "gftools-fix-font failed: {}",
+                e
+            ))),
         }
-        for (axis, value) in &self.config.fvar_instance_axis_dflts {
-            cmd_parts.push(format!("--fvar-instance-axis-dflt={}:{}", axis, value));
-        }
-
-        // Add any additional args
-        if let Some(ref args) = self.args {
-            cmd_parts.push(args.clone());
-        }
-
-        let cmd = cmd_parts.join(" ");
-        self.run_shell_command(&cmd, outputs)
     }
 
     fn description(&self) -> String {
