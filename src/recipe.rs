@@ -169,7 +169,7 @@ impl Recipe {
                 .collect();
 
             // Add the path and get the nodes for each step
-            let step_nodes = graph.add_path(source_filename, operations_for_path, &target);
+            let step_nodes = graph.add_path(source_filename, operations_for_path, target);
 
             // Record dependencies with their corresponding nodes
             for (step_idx, (_, _, needs)) in operations.iter().enumerate() {

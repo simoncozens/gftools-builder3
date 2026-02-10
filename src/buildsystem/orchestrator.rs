@@ -21,7 +21,7 @@ use tokio::{
     time::Instant,
     try_join,
 };
-use tracing::{Instrument, debug, info, info_span};
+use tracing::{Instrument, info, info_span};
 
 // #[derive(Clone)]
 pub struct Configuration {

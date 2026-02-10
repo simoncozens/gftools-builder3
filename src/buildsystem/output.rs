@@ -1,5 +1,5 @@
 use babelfont::Font;
-use fontations::read::FontRef;
+// use fontations::read::FontRef;
 use std::sync::{Arc, Mutex, MutexGuard};
 use tempfile::NamedTempFile;
 
@@ -239,7 +239,7 @@ impl OperationOutput {
                 "Temporary file is not set".to_string(),
             )),
             RawOperationOutput::InMemoryBytes(bytes) => Ok(bytes.clone()),
-            RawOperationOutput::SourceFont(font) => {
+            RawOperationOutput::SourceFont(_font) => {
                 // Convert in-memory bytes to a temp file by writing it in Glyphs format
                 // Unfortunately this currently requires a temp file on disk
                 let temp_file = self.to_filename(Some(".glyphs"))?;

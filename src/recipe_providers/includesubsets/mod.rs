@@ -114,6 +114,7 @@ pub struct IncludeSubsetsOptions {
 }
 
 impl IncludeSubsetsOptions {
+    #[allow(dead_code)]
     /// Validate the configuration
     pub fn validate(&self) -> Result<(), ApplicationError> {
         self.subset.validate()
