@@ -1,5 +1,6 @@
 use crate::recipe_providers::includesubsets::IncludeSubsetsOptions;
 use babelfont::{Font, Instance, UserCoord};
+use fontdrasil::coords::UserLocation;
 use serde::{Deserialize, Serialize};
 use serde_inline_default::serde_inline_default;
 use serde_json::Value;
@@ -37,6 +38,10 @@ impl FontFormat {
 }
 
 pub type ItalicDescriptor = (String, UserCoord, UserCoord);
+
+fn big_hammer<T, U>(x: T) -> U {
+    unsafe { std::mem::transmute_copy(&x) }
+}
 
 #[serde_inline_default]
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
@@ -359,8 +364,26 @@ impl GoogleFontsProvider {
         );
         builder = self.add_subset_steps(builder)?;
         builder = builder.compile(&self.options.fontc_config);
-        if source.masters.len() > 1 {
-            builder = builder.instance(&instance.location);
+        if source.instances.len() > 1 {
+            let loc: UserLocation = instance
+                .location
+                .iter()
+                .map(|(axis, value)| {
+                    (
+                        fontdrasil::types::Tag::new(&axis.into_bytes()),
+                        big_hammer(
+                            source
+                                .axes
+                                .iter()
+                                .find(|ax| ax.tag == *axis)
+                                .unwrap()
+                                .designspace_to_userspace(*value)
+                                .unwrap(),
+                        ),
+                    )
+                })
+                .collect();
+            builder = builder.instance(&loc);
         }
         // Autohint steps
         // VTT steps

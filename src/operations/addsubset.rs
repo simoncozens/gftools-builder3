@@ -165,6 +165,7 @@ impl Operation for AddSubset {
             *donor_font,
             filter,
             self.config.layout_handling,
+            true,
         )
         .map_err(|e| ApplicationError::Other(format!("Font merge failed: {}", e)))?;
         outputs[0].set_font_source(Box::new(output_font))?;

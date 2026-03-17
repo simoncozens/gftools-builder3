@@ -111,9 +111,17 @@ pub async fn build(config: BuildConfig) -> Result<(), ApplicationError> {
     let recipe = tokio::task::block_in_place(|| config_yaml.recipe())?;
 
     if config.generate_only {
-        let serialized_recipe = serde_yaml_ng::to_string(&recipe).map_err(|e| {
-            ApplicationError::InvalidRecipe(format!("Could not serialize recipe to YAML: {}", e))
-        })?;
+        #[derive(serde::Serialize)]
+        struct GeneratedRecipe {
+            recipe: Recipe,
+        }
+        let serialized_recipe =
+            serde_yaml_ng::to_string(&GeneratedRecipe { recipe }).map_err(|e| {
+                ApplicationError::InvalidRecipe(format!(
+                    "Could not serialize recipe to YAML: {}",
+                    e
+                ))
+            })?;
         println!("{serialized_recipe}");
         return Ok(());
     }

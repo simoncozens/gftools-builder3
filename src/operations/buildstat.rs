@@ -4,8 +4,7 @@ use crate::{
     buildsystem::{DataKind, Operation, OperationOutput},
     error::ApplicationError,
 };
-use fontations::read::FontRef;
-use google_fonts_axisregistry::build_stat;
+use google_fonts_axisregistry::{FontRef, build_stat};
 
 #[derive(PartialEq, Debug)]
 pub(crate) struct BuildStat;
@@ -34,7 +33,8 @@ impl Operation for BuildStat {
             .map(|input| input.to_bytes())
             .collect::<Result<Vec<_>, _>>()?;
         for index in 0..inputs.len() {
-            let font = FontRef::new(&all_siblings_bytes[index])?;
+            let font = FontRef::new(&all_siblings_bytes[index])
+                .map_err(|e| ApplicationError::Other(format!("Failed to read font: {}", e)))?;
             let others: Vec<FontRef> = all_siblings_bytes
                 .iter()
                 .enumerate()

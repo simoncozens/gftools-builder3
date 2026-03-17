@@ -53,10 +53,9 @@ impl Operation for Fix {
         outputs: &[OperationOutput],
     ) -> Result<Output, ApplicationError> {
         let _span = info_span!("gftools-fix-font").entered();
-
         match fix_font(
-            &inputs[0].to_filename(None)?,
-            &outputs[0].to_filename(None)?,
+            &inputs[0].to_filename(Some(".ttf"))?,
+            &outputs[0].to_filename(Some(".ttf"))?,
             self.config.include_source_fixes,
         ) {
             Ok(()) => Ok(Output {

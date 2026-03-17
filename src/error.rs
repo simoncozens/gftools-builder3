@@ -52,8 +52,8 @@ impl<T> From<PoisonError<T>> for ApplicationError {
     }
 }
 
-impl From<fontations::read::ReadError> for ApplicationError {
-    fn from(error: fontations::read::ReadError) -> Self {
+impl From<read_fonts::ReadError> for ApplicationError {
+    fn from(error: read_fonts::ReadError) -> Self {
         Self::FontReadError(error.to_string())
     }
 }

@@ -5,7 +5,8 @@ use crate::{
     operations::{addsubset::AddSubsetConfig, fix::FixConfig, fontc::FontcConfig},
     recipe::{ConfigOperation, Step},
 };
-use babelfont::DesignLocation;
+use fontdrasil::coords::UserLocation;
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 pub mod addsubset;
@@ -15,6 +16,7 @@ pub mod convert;
 pub mod fix;
 pub mod fontc;
 pub mod glyphs2ufo;
+pub mod subspace;
 
 /// Enum representing the different operation steps available
 ///
@@ -33,6 +35,8 @@ pub(crate) enum OpStep {
     Compress,
     #[serde(rename = "addSubset")]
     AddSubset,
+    #[serde(rename = "subspace")]
+    Subspace,
 }
 
 impl OpStep {
@@ -45,6 +49,7 @@ impl OpStep {
             OpStep::BuildStat => Box::new(buildstat::BuildStat),
             OpStep::Compress => Box::new(compress::Compress),
             OpStep::AddSubset => Box::new(addsubset::AddSubset::new()),
+            OpStep::Subspace => Box::new(subspace::Subspace::new()),
         }
     }
 }
@@ -148,9 +153,20 @@ impl ConfigOperationBuilder {
         self
     }
 
-    pub fn instance(self, _location: &DesignLocation) -> Self {
-        panic!("We can't instance things in Rust yet");
-        // self
+    pub fn instance(mut self, location: &UserLocation) -> Self {
+        self.steps.push(Step::OperationStep {
+            operation: OpStep::Subspace,
+            args: Some(
+                location
+                    .iter()
+                    .map(|(axis, value)| format!("{}={}", axis, value.to_f64()))
+                    .join(","),
+            ),
+            input_file: None,
+            extra: HashMap::new(),
+            needs: vec![],
+        });
+        self
     }
 }
 
