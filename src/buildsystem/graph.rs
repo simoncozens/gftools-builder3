@@ -31,7 +31,7 @@ pub struct BuildGraph {
     pub source: NodeIndex,
     pub sinks: Vec<NodeIndex>,
     /// Maps target names to their final operation node (before the sink)
-    target_nodes: std::collections::HashMap<String, NodeIndex>,
+    pub(crate) target_nodes: std::collections::HashMap<String, NodeIndex>,
 }
 
 impl BuildGraph {

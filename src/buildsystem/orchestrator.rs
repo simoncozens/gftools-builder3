@@ -4,13 +4,19 @@
 //! Many thanks to Yota Toyama for making this code available under the MIT/Apache licenses.
 //! A parallel build system in just under 200 lines of Rust is astonishing.
 use crate::{
-    buildsystem::{BuildGraph, BuildStep, OperationOutput},
+    buildsystem::{BuildGraph, BuildStep, OperationOutput, graph::BuildEdge},
     error::ApplicationError,
 };
 use async_recursion::async_recursion;
+use core::panic;
 use dashmap::DashMap;
 use futures::future::{FutureExt, Shared, try_join_all};
-use petgraph::{Direction, graph::NodeIndex, visit::EdgeRef};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use petgraph::{
+    Direction,
+    graph::{EdgeIndex, EdgeReference, NodeIndex},
+    visit::EdgeRef,
+};
 use std::{
     collections::HashSet, error::Error, future::Future, pin::Pin, process::Output, sync::Arc,
 };
@@ -96,14 +102,9 @@ fn get_target_files(context: &Context, index: NodeIndex) -> Vec<String> {
 pub async fn run(graph: BuildGraph, job_limit: usize) -> Result<(), ApplicationError> {
     let configuration = Configuration::new(graph);
     let context = Arc::new(Context::new(job_limit, Arc::new(configuration)));
-    // Work out the final targets.
-    let final_targets: HashSet<NodeIndex> =
-        HashSet::from_iter(context.configuration.graph().externals(Direction::Outgoing));
-
-    log::info!("Starting build for {} targets", final_targets.len());
-
-    for target in final_targets {
-        trigger_build(context.clone(), target).await?;
+    for (name, target_node) in &context.configuration.graph().target_nodes {
+        trigger_build(context.clone(), *target_node).await?;
+        context.add_progressbar(*target_node, name);
     }
 
     // Do not inline this to avoid borrowing a lock of builds.
@@ -157,7 +158,6 @@ async fn spawn_build(context: Arc<Context>, index: NodeIndex) -> Result<(), Appl
                 .graph()
                 .edges_directed(index, Direction::Incoming)
                 .collect();
-            
             // Collect inputs by slot, similar to how we handle outputs
             let max_input_slot = in_edges.iter().map(|e| e.weight().output_slot).max().unwrap_or(0);
             let mut input_files = vec![None; max_input_slot + 1];
@@ -169,7 +169,6 @@ async fn spawn_build(context: Arc<Context>, index: NodeIndex) -> Result<(), Appl
             }
             // Convert to non-Option vec (all slots should be filled)
             let input_files: Vec<OperationOutput> = input_files.into_iter().flatten().collect();
-            
             // Collect outputs by slot. Multiple edges may reference the same slot (broadcasting).
             // We need to build a Vec where outputs[slot] contains the OperationOutput for that slot.
             let out_edges: Vec<_> = context
@@ -190,7 +189,6 @@ async fn spawn_build(context: Arc<Context>, index: NodeIndex) -> Result<(), Appl
 
             // Convert to non-Option vec (all slots should be filled)
             let output_files: Vec<OperationOutput> = output_files.into_iter().flatten().collect();
-            
             // Build all input dependencies
             for edge in &in_edges {
                 futures.push(build_input(context.clone(), edge.source()).await?);
@@ -199,6 +197,16 @@ async fn spawn_build(context: Arc<Context>, index: NodeIndex) -> Result<(), Appl
 
             // OK, we are ready.
             run_op(&context, build, &input_files, &output_files).await?;
+
+            // Advance progress bars for all targets reachable from this build step.
+            let op_desc = build.shortname().to_string();
+            for edge in context
+                .configuration
+                .graph()
+                .edges_directed(index, Direction::Outgoing)
+            {
+                context.step_progressbar(edge, &op_desc);
+            }
 
             Ok::<(), ApplicationError>(())
         }
@@ -256,7 +264,7 @@ async fn run_op(
             async {
                 let start_time = Instant::now();
                 if !inputs.is_empty() && !outputs.is_empty() && !op.hidden() {
-                    println!("{}", &description);
+                    context.progressbars.println(&description);
                 }
                 let output = context
                     .run_with_semaphore(|| op.execute(inputs, outputs))
@@ -302,20 +310,77 @@ pub struct Context {
     console: Mutex<()>,
     pub configuration: Arc<Configuration>,
     pub build_futures: DashMap<NodeIndex, BuildFuture>,
+    pub progressbars: MultiProgress,
+    pub progress_bar_for_target: DashMap<NodeIndex, indicatif::ProgressBar>,
+    pub edges_to_final_target_nodes: DashMap<EdgeIndex, Vec<NodeIndex>>,
 }
 
 impl Context {
     pub fn new(job_limit: usize, configuration: Arc<Configuration>) -> Self {
-        Self {
+        let mut ctx = Self {
             command_semaphore: Semaphore::new(job_limit),
             console: Mutex::new(()),
             configuration,
             build_futures: DashMap::new(),
-        }
+            progressbars: MultiProgress::new(),
+            progress_bar_for_target: DashMap::new(),
+            edges_to_final_target_nodes: DashMap::new(),
+        };
+        ctx
     }
 
     pub fn console(&self) -> &Mutex<()> {
         &self.console
+    }
+
+    pub fn add_progressbar(&self, target: NodeIndex, name: &str) {
+        // Walk the graph backwards to count steps for this target
+        let mut steps = 0;
+        let mut node = target;
+        let basename = name.rsplit('/').next().unwrap_or(name);
+        let graph = self.configuration.graph();
+        // Check for edges outgoing too
+        if let Some(edge) = graph.edges_directed(node, Direction::Outgoing).next() {
+            self.edges_to_final_target_nodes
+                .entry(edge.id())
+                .or_default()
+                .push(target);
+        }
+
+        while let Some(edge) = graph.edges_directed(node, Direction::Incoming).next() {
+            steps += 1;
+            node = edge.source();
+            self.edges_to_final_target_nodes
+                .entry(edge.id())
+                .or_default()
+                .push(target);
+        }
+        let sty =
+            ProgressStyle::with_template("{prefix:40!} {wide_bar:.cyan/blue} {msg:10!}").unwrap();
+
+        let pb = self
+            .progressbars
+            .add(ProgressBar::new(steps as u64))
+            .with_finish(indicatif::ProgressFinish::Abandon);
+        pb.set_style(sty);
+        pb.set_prefix(basename.to_string());
+        self.progress_bar_for_target.insert(target, pb);
+    }
+
+    pub fn step_progressbar(&self, op_step: EdgeReference<BuildEdge>, op_desc: &str) {
+        // Find the final target(s) for this op, and increment it
+        let target_nodes = self
+            .edges_to_final_target_nodes
+            .get(&op_step.id())
+            .map(|entry| entry.value().clone())
+            .unwrap_or_default();
+
+        for target_node in target_nodes {
+            if let Some(pb) = self.progress_bar_for_target.get(&target_node) {
+                pb.set_message(op_desc.to_string());
+                pb.inc(1);
+            }
+        }
     }
 
     pub async fn run_with_semaphore(
