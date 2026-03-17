@@ -172,8 +172,12 @@ impl OperationOutput {
             }
             RawOperationOutput::InMemoryBytes(bytes) => {
                 // Convert in-memory bytes to a temp file by writing it
-                let temp_file =
-                    NamedTempFile::new().map_err(|e| ApplicationError::Other(e.to_string()))?;
+                let temp_file = if let Some(suffix) = suffix {
+                    NamedTempFile::with_suffix(suffix)
+                } else {
+                    NamedTempFile::new()
+                }
+                .map_err(|e| ApplicationError::Other(e.to_string()))?;
                 // write
                 let temp_path = temp_file.path();
                 let temp_path_string = temp_path.to_string_lossy().to_string();
