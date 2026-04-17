@@ -10,6 +10,7 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 pub mod addsubset;
+pub mod autohint;
 pub mod buildstat;
 pub mod compress;
 pub mod convert;
@@ -37,6 +38,8 @@ pub(crate) enum OpStep {
     AddSubset,
     #[serde(rename = "subspace")]
     Subspace,
+    #[serde(rename = "autohint")]
+    Autohint,
 }
 
 impl OpStep {
@@ -50,6 +53,7 @@ impl OpStep {
             OpStep::Compress => Box::new(compress::Compress),
             OpStep::AddSubset => Box::new(addsubset::AddSubset::new()),
             OpStep::Subspace => Box::new(subspace::Subspace::new()),
+            OpStep::Autohint => Box::new(autohint::Autohint::new()),
         }
     }
 }
@@ -61,6 +65,10 @@ pub struct ConfigOperationBuilder {
 impl ConfigOperationBuilder {
     pub fn new() -> Self {
         ConfigOperationBuilder { steps: vec![] }
+    }
+
+    pub(crate) fn new_from_steps(steps: Vec<Step>) -> Self {
+        ConfigOperationBuilder { steps }
     }
 
     pub fn build(self) -> ConfigOperation {
@@ -164,6 +172,17 @@ impl ConfigOperationBuilder {
             ),
             input_file: None,
             extra: HashMap::new(),
+            needs: vec![],
+        });
+        self
+    }
+
+    pub fn autohint(mut self) -> Self {
+        self.steps.push(Step::OperationStep {
+            operation: OpStep::Autohint,
+            extra: HashMap::new(),
+            args: None,
+            input_file: None,
             needs: vec![],
         });
         self

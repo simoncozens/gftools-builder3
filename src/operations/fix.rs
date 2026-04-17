@@ -40,7 +40,7 @@ impl Operation for Fix {
     }
 
     fn input_kinds(&self) -> Vec<DataKind> {
-        vec![DataKind::Path]
+        vec![DataKind::Bytes]
     }
 
     fn output_kinds(&self) -> Vec<DataKind> {

@@ -15,14 +15,14 @@ use crate::{
 };
 
 #[derive(PartialEq, Debug, Clone, Copy)]
-enum Style {
+pub(crate) enum Style {
     Roman,
     Italic,
 }
 
 #[allow(clippy::upper_case_acronyms, dead_code)]
 #[derive(PartialEq, Debug, Clone, Copy)]
-enum FontFormat {
+pub(crate) enum FontFormat {
     TTF,
     OTF,
     WOFF2,
@@ -37,7 +37,12 @@ impl FontFormat {
     }
 }
 
-pub type ItalicDescriptor = (String, UserCoord, UserCoord);
+#[derive(Debug, Clone)]
+pub(crate) struct ItalicDescriptor {
+    axis_tag: String,
+    min_value: UserCoord,
+    max_value: UserCoord,
+}
 
 fn big_hammer<T, U>(x: T) -> U {
     unsafe { std::mem::transmute_copy(&x) }
@@ -122,7 +127,7 @@ impl GoogleFontsOptions {
         self.woff_dir.replace("$outputDir", &self.output_dir)
     }
 
-    fn vf_filename(
+    pub(crate) fn vf_filename(
         &self,
         source: &Font,
         suffix: Option<&str>,
@@ -149,7 +154,7 @@ impl GoogleFontsOptions {
             .iter()
             .map(|axis| axis.tag.to_string())
             .collect::<Vec<String>>();
-        if let Some((axis_tag, _, _)) = italic_ds.as_ref() {
+        if let Some(axis_tag) = italic_ds.map(|x| &x.axis_tag) {
             if roman == Style::Italic {
                 sourcebase.push_str("-Italic");
             }
@@ -226,12 +231,64 @@ impl Provider for GoogleFontsProvider {
     fn generate_recipe(&self) -> Result<Recipe, ApplicationError> {
         let mut provider = Self::new(self.options.clone());
         provider.load_all_sources()?;
+        provider.build_all_variables()?;
+        provider.build_all_statics()?;
+
         // Implementation for rewriting the recipe for Google fonts
         Ok(provider.recipe)
     }
 }
 
 impl GoogleFontsProvider {
+    fn style_for_instance(
+        &self,
+        source: &Font,
+        instance: &Instance,
+        italic_ds: &ItalicDescriptor,
+    ) -> Style {
+        let Some((_, designspace_value)) = instance
+            .location
+            .iter()
+            .find(|(axis, _)| axis.to_string() == italic_ds.axis_tag)
+        else {
+            return Style::Roman;
+        };
+
+        source
+            .axes
+            .iter()
+            .find(|axis| axis.tag.to_string() == italic_ds.axis_tag)
+            .and_then(|axis| axis.designspace_to_userspace(*designspace_value).ok())
+            .map(|value| {
+                if value == italic_ds.max_value {
+                    Style::Italic
+                } else {
+                    Style::Roman
+                }
+            })
+            .unwrap_or(Style::Roman)
+    }
+
+    fn vf_source_for_instance(
+        &self,
+        source: &Font,
+        instance: &Instance,
+    ) -> Result<String, ApplicationError> {
+        let italic_ds = self.has_slant_italic(source);
+        let style = italic_ds
+            .as_ref()
+            .map(|italic_ds| self.style_for_instance(source, instance, italic_ds))
+            .unwrap_or(Style::Roman);
+
+        self.options.vf_filename(
+            source,
+            self.options.filename_suffix.as_deref(),
+            FontFormat::TTF,
+            italic_ds.as_ref(),
+            style,
+        )
+    }
+
     fn load_all_sources(&mut self) -> Result<(), ApplicationError> {
         for source in &self.options.sources {
             log::debug!("Loading source font: {}", source);
@@ -240,8 +297,6 @@ impl GoogleFontsProvider {
             })?;
             self.sources.push(font);
         }
-        self.build_all_variables()?;
-        self.build_all_statics()?;
         Ok(())
     }
 
@@ -249,57 +304,47 @@ impl GoogleFontsProvider {
         if !self.options.build_variable {
             return Ok(());
         }
-        let new_recipes = self
+        let variable_targets = self
             .sources
             .iter()
             .filter(|source| source.masters.len() >= 2)
             .flat_map(|source| {
                 if let Some(italic_ds) = self.has_slant_italic(source) {
                     vec![
-                        self.build_a_variable(source, Some(&italic_ds), Style::Italic),
-                        self.build_a_variable(source, Some(&italic_ds), Style::Roman),
+                        (source, Some(italic_ds.clone()), Style::Italic),
+                        (source, Some(italic_ds), Style::Roman),
                         // if we have a stat file, we need to rewrite it here, unfortunately
                     ]
                 } else {
-                    vec![self.build_a_variable(source, None, Style::Roman)]
+                    vec![(source, None, Style::Roman)]
                 }
             })
-            .collect::<Result<Vec<Recipe>, ApplicationError>>()?;
+            .collect::<Vec<_>>();
+        let filenames = variable_targets
+            .iter()
+            .map(|(source, italic_ds, roman)| {
+                self.options.vf_filename(
+                    source,
+                    self.options.filename_suffix.as_deref(),
+                    FontFormat::TTF,
+                    italic_ds.as_ref(),
+                    *roman,
+                )
+            })
+            .collect::<Result<Vec<_>, ApplicationError>>()?;
+        let mut new_recipes = vec![];
+        for (index, (source, italic_ds, style)) in variable_targets.into_iter().enumerate() {
+            let siblings = if index == 0 {
+                Some(filenames.iter().skip(1).cloned().collect::<Vec<String>>())
+            } else {
+                None
+            };
+            new_recipes.push(self.build_a_variable(source, italic_ds.as_ref(), style, siblings)?);
+        }
         let mut flat_recipes = Recipe::new();
         for recipe in new_recipes {
             flat_recipes.extend(recipe.clone());
         }
-        // Do STAT table
-        if !flat_recipes.is_empty() {
-            // Find a TTF target (not woff2) to add the BuildStat step to
-            let first_ttf_target = flat_recipes
-                .0
-                .keys()
-                .find(|k| !k.ends_with(".woff2"))
-                .cloned();
-
-            if let Some(first_target) = first_ttf_target {
-                // Collect other TTF targets as dependencies (skip the first one we're adding to)
-                let other_targets: Vec<String> = flat_recipes
-                    .0
-                    .keys()
-                    .filter(|k| !k.ends_with(".woff2") && *k != &first_target)
-                    .cloned()
-                    .collect();
-
-                // Add BuildStat to the first TTF recipe
-                if let Some(recipe) = flat_recipes.0.get_mut(&first_target) {
-                    recipe.0.push(crate::recipe::Step::OperationStep {
-                        operation: crate::operations::OpStep::BuildStat,
-                        needs: other_targets,
-                        args: None,
-                        extra: HashMap::new(),
-                        input_file: None,
-                    });
-                }
-            }
-        }
-
         // Do avar2
         self.recipe.extend(flat_recipes);
         Ok(())
@@ -346,24 +391,15 @@ impl GoogleFontsProvider {
                 .unwrap_or(&"Regular".to_string())
         )
         .replace(" ", "");
-        let mut recipe = Recipe::new();
         let target = self.options.static_filename(
             &instance_base,
             self.options.filename_suffix.as_deref(),
             Some(format.extension()),
         );
         log::debug!("Static target filename: {}", target);
-        let mut builder = ConfigOperationBuilder::new();
-        builder = builder.source(
-            source
-                .source
-                .as_ref()
-                .unwrap()
-                .to_string_lossy()
-                .to_string(),
-        );
-        builder = self.add_subset_steps(builder)?;
-        builder = builder.compile(&self.options.fontc_config);
+        let mut recipe = Recipe::new();
+        let vf_filename = self.vf_source_for_instance(source, instance)?;
+        let mut builder = ConfigOperationBuilder::new().source(vf_filename);
         if source.instances.len() > 1 {
             let loc: UserLocation = instance
                 .location
@@ -386,6 +422,7 @@ impl GoogleFontsProvider {
             builder = builder.instance(&loc);
         }
         // Autohint steps
+        builder = builder.autohint();
         // VTT steps
         builder = builder.fix(&self.options.fix_config);
 
@@ -409,6 +446,7 @@ impl GoogleFontsProvider {
         source: &Font,
         italic_ds: Option<&ItalicDescriptor>,
         roman: Style,
+        siblings: Option<Vec<String>>,
     ) -> Result<Recipe, ApplicationError> {
         log::debug!(
             "Considering how to build variable font for {}",
@@ -428,6 +466,7 @@ impl GoogleFontsProvider {
             roman,
         )?;
         log::debug!("VF target filename: {}", target);
+
         let mut builder = ConfigOperationBuilder::new();
         builder = builder.source(
             source
@@ -438,13 +477,15 @@ impl GoogleFontsProvider {
                 .to_string(),
         );
         builder = self.add_subset_steps(builder)?;
-        // Subset steps here
         builder = builder.compile(&self.options.fontc_config);
         // Any post-compile steps
         // Any VTT steps
         // If italic, subspace the axes according to style
 
         builder = builder.fix(&self.options.fix_config);
+        if let Some(siblings) = siblings {
+            builder = builder.buildstat(&siblings);
+        }
 
         if self.options.build_webfont {
             let webfont_target = self.options.vf_filename(
@@ -470,7 +511,11 @@ impl GoogleFontsProvider {
             if axis.tag == "ital"
                 && let Some((min, _, max)) = axis.bounds()
             {
-                return Some((axis.tag.to_string(), min, max));
+                return Some(ItalicDescriptor {
+                    axis_tag: axis.tag.to_string(),
+                    min_value: min,
+                    max_value: max,
+                });
             }
         }
 
@@ -478,7 +523,11 @@ impl GoogleFontsProvider {
             if axis.tag == "slnt"
                 && let Some((min, _, max)) = axis.bounds()
             {
-                return Some((axis.tag.to_string(), max, min));
+                return Some(ItalicDescriptor {
+                    axis_tag: axis.tag.to_string(),
+                    min_value: max,
+                    max_value: min,
+                });
             }
         }
 

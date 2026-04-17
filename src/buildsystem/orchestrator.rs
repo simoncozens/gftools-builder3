@@ -8,7 +8,6 @@ use crate::{
     error::ApplicationError,
 };
 use async_recursion::async_recursion;
-use core::panic;
 use dashmap::DashMap;
 use futures::future::{FutureExt, Shared, try_join_all};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -47,64 +46,54 @@ impl Configuration {
 type RawBuildFuture = Pin<Box<dyn Future<Output = Result<(), ApplicationError>> + Send>>;
 pub(crate) type BuildFuture = Shared<RawBuildFuture>;
 
-/// Helper function to get target filenames for a given node index.
-/// This traces through outgoing edges to find all named output files associated with this build step.
+/// Helper function to get final sink target filenames for a given node index.
+/// This traces through outgoing edges until it reaches Sink nodes and returns the named
+/// files written there, ignoring intermediate debug artifacts.
 fn get_target_files(context: &Context, index: NodeIndex) -> Vec<String> {
     let mut targets = vec![];
+    let mut to_visit = vec![index];
+    let mut visited = HashSet::new();
 
-    // Get immediate outputs
-    if let Some(_build) = context.configuration.graph().node_weight(index) {
+    while let Some(current) = to_visit.pop() {
+        if visited.contains(&current) {
+            continue;
+        }
+        visited.insert(current);
+
         for edge in context
             .configuration
             .graph()
-            .edges_directed(index, Direction::Outgoing)
+            .edges_directed(current, Direction::Outgoing)
         {
-            if let Ok(output_lock) = edge.weight().output.lock()
-                && let crate::buildsystem::output::RawOperationOutput::NamedFile(name) =
-                    &*output_lock
+            if let Some(node_weight) = context.configuration.graph().node_weight(edge.target())
+                && node_weight.shortname() == "Sink"
+                && let Ok(output_lock) = edge.weight().output.lock()
+                && let crate::buildsystem::output::RawOperationOutput::NamedFile(name) = &*output_lock
             {
                 targets.push(name.clone());
-            }
-        }
-    }
-
-    // If we have no targets yet, look further downstream for named files
-    if targets.is_empty() {
-        let mut to_visit = vec![index];
-        let mut visited = HashSet::new();
-
-        while let Some(current) = to_visit.pop() {
-            if visited.contains(&current) {
                 continue;
             }
-            visited.insert(current);
-
-            for edge in context
-                .configuration
-                .graph()
-                .edges_directed(current, Direction::Outgoing)
-            {
-                if let Ok(output_lock) = edge.weight().output.lock()
-                    && let crate::buildsystem::output::RawOperationOutput::NamedFile(name) =
-                        &*output_lock
-                {
-                    targets.push(name.clone());
-                    break; // Found a named output, stop for this path
-                }
-                to_visit.push(edge.target());
-            }
+            to_visit.push(edge.target());
         }
     }
 
+    targets.sort();
+    targets.dedup();
     targets
 }
 
-pub async fn run(graph: BuildGraph, job_limit: usize) -> Result<(), ApplicationError> {
+pub async fn run(
+    graph: BuildGraph,
+    job_limit: usize,
+    progress: bool,
+) -> Result<(), ApplicationError> {
     let configuration = Configuration::new(graph);
-    let context = Arc::new(Context::new(job_limit, Arc::new(configuration)));
+    let context = Arc::new(Context::new(job_limit, Arc::new(configuration), progress));
     for (name, target_node) in &context.configuration.graph().target_nodes {
         trigger_build(context.clone(), *target_node).await?;
-        context.add_progressbar(*target_node, name);
+        if progress {
+            context.add_progressbar(*target_node, name);
+        }
     }
 
     // Do not inline this to avoid borrowing a lock of builds.
@@ -196,9 +185,10 @@ async fn spawn_build(context: Arc<Context>, index: NodeIndex) -> Result<(), Appl
             try_join_all(futures).await?;
 
             // OK, we are ready.
-            run_op(&context, build, &input_files, &output_files).await?;
+            run_op(&context, build, &input_files, &output_files, &targets).await?;
 
             // Advance progress bars for all targets reachable from this build step.
+            if context.progress {
             let op_desc = build.shortname().to_string();
             for edge in context
                 .configuration
@@ -208,6 +198,7 @@ async fn spawn_build(context: Arc<Context>, index: NodeIndex) -> Result<(), Appl
                 context.step_progressbar(edge, &op_desc);
             }
 
+        }
             Ok::<(), ApplicationError>(())
         }
         .instrument(span)
@@ -234,7 +225,10 @@ async fn run_op(
     op: &BuildStep,
     inputs: &[OperationOutput],
     outputs: &[OperationOutput],
+    final_targets: &[String],
 ) -> Result<(), ApplicationError> {
+    let input_strs: Vec<String> = inputs.iter().map(|o| o.to_string()).collect();
+    let inputs_str = input_strs.join(", ");
     let output_strs: Vec<String> = outputs.iter().map(|o| o.to_string()).collect();
     let outputs_str = output_strs.join(", ");
 
@@ -247,16 +241,19 @@ async fn run_op(
     let description = format!(
         "{}: {} -> {}",
         op.description(),
-        inputs
-            .iter()
-            .map(|x| format!("{x}"))
-            .collect::<Vec<_>>()
-            .join(", "),
-        outputs
-            .iter()
-            .map(|x| format!("{x}"))
-            .collect::<Vec<_>>()
-            .join(", "),
+        inputs_str,
+        outputs_str,
+    );
+
+    let target_summary = if final_targets.is_empty() {
+        outputs_str.clone()
+    } else {
+        final_targets.join(", ")
+    };
+
+    let failure_context = format!(
+        "operation '{}' while building [{}] from [{}]",
+        op.shortname(), target_summary, inputs_str
     );
 
     let inner = async {
@@ -264,11 +261,12 @@ async fn run_op(
             async {
                 let start_time = Instant::now();
                 if !inputs.is_empty() && !outputs.is_empty() && !op.hidden() {
-                    context.progressbars.println(&description);
+                    context.print_description(&description).await;
                 }
                 let output = context
                     .run_with_semaphore(|| op.execute(inputs, outputs))
-                    .await?;
+                    .await
+                    .map_err(|e| ApplicationError::Other(format!("{}: {}", failure_context, e)))?;
 
                 let elapsed = Instant::now() - start_time;
                 Ok::<_, ApplicationError>((output, elapsed))
@@ -295,7 +293,10 @@ async fn run_op(
         if !output.status.success() {
             stdout().write_all(&output.stdout).await?;
             stderr().write_all(&output.stderr).await?;
-            return Err(ApplicationError::Build);
+            return Err(ApplicationError::Other(format!(
+                "{}: process exited with status {}",
+                failure_context, output.status
+            )));
         }
 
         Ok::<(), ApplicationError>(())
@@ -310,23 +311,24 @@ pub struct Context {
     console: Mutex<()>,
     pub configuration: Arc<Configuration>,
     pub build_futures: DashMap<NodeIndex, BuildFuture>,
+    pub progress: bool,
     pub progressbars: MultiProgress,
     pub progress_bar_for_target: DashMap<NodeIndex, indicatif::ProgressBar>,
     pub edges_to_final_target_nodes: DashMap<EdgeIndex, Vec<NodeIndex>>,
 }
 
 impl Context {
-    pub fn new(job_limit: usize, configuration: Arc<Configuration>) -> Self {
-        let mut ctx = Self {
+    pub fn new(job_limit: usize, configuration: Arc<Configuration>, progress: bool) -> Self {
+        Self {
             command_semaphore: Semaphore::new(job_limit),
             console: Mutex::new(()),
             configuration,
             build_futures: DashMap::new(),
+            progress,
             progressbars: MultiProgress::new(),
             progress_bar_for_target: DashMap::new(),
             edges_to_final_target_nodes: DashMap::new(),
-        };
-        ctx
+        }
     }
 
     pub fn console(&self) -> &Mutex<()> {
@@ -393,5 +395,14 @@ impl Context {
         drop(permit);
 
         Ok(output)
+    }
+
+    pub async fn print_description(&self, description: &str) {
+        if self.progress {
+            let _ = self.progressbars.println(description);
+        } else {
+            let _console_lock = self.console.lock().await;
+            println!("{description}");
+        }
     }
 }

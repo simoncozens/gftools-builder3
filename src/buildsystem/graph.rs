@@ -1,14 +1,19 @@
-use std::{fmt::Display, sync::Arc};
+use std::{fmt::Display, path::Path, sync::Arc};
 
 use petgraph::{Graph, graph::NodeIndex, visit::EdgeRef};
 
 use crate::{
     buildsystem::{Operation, OperationOutput, output::RawOperationOutput, sourcesink::SourceSink},
     error::ApplicationError,
-    operations::convert::{BytesToTempFile, FileToBytes, PathToSourceFont},
+    operations::convert::{FileToBytes, PathToSourceFont},
 };
 
 pub type BuildStep = Arc<Box<dyn Operation>>;
+
+pub struct AddedPath {
+    pub entry_node: NodeIndex,
+    pub op_nodes: Vec<NodeIndex>,
+}
 
 /// An edge in the build graph, representing data flow from one operation to another.
 /// The edge specifies which output slot from the source operation it consumes.
@@ -28,6 +33,7 @@ impl Display for BuildEdge {
 
 pub struct BuildGraph {
     graph: Graph<Arc<Box<dyn Operation + 'static>>, BuildEdge>,
+    debug_intermediates: bool,
     pub source: NodeIndex,
     pub sinks: Vec<NodeIndex>,
     /// Maps target names to their final operation node (before the sink)
@@ -35,16 +41,97 @@ pub struct BuildGraph {
 }
 
 impl BuildGraph {
-    pub fn new() -> Self {
+    pub fn new(debug_intermediates: bool) -> Self {
         let mut g = Graph::new();
         let source_node: Box<dyn Operation + 'static> = Box::new(SourceSink::Source);
         let source = g.add_node(Arc::new(source_node));
         let sinks = vec![];
         Self {
             graph: g,
+            debug_intermediates,
             source,
             sinks,
             target_nodes: std::collections::HashMap::new(),
+        }
+    }
+
+    fn sanitize_debug_component(component: &str) -> String {
+        component
+            .chars()
+            .map(|ch| match ch {
+                'a'..='z' | 'A'..='Z' | '0'..='9' => ch,
+                _ => '-',
+            })
+            .collect::<String>()
+            .trim_matches('-')
+            .to_ascii_lowercase()
+    }
+
+    fn debug_filename(
+        &self,
+        source_filename: &str,
+        sink_filename: &str,
+        op_chain: &[String],
+        kind: crate::buildsystem::DataKind,
+    ) -> String {
+        let sink_path = Path::new(sink_filename);
+        let directory = Path::new("debug-build");
+        let source_name = Path::new(source_filename)
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| "intermediate".to_string());
+        let extension = match kind {
+            crate::buildsystem::DataKind::SourceFont => Path::new(source_filename)
+                .extension()
+                .map(|ext| ext.to_string_lossy().to_string())
+                .unwrap_or_else(|| "glyphs".to_string()),
+            crate::buildsystem::DataKind::Path
+            | crate::buildsystem::DataKind::Bytes
+            | crate::buildsystem::DataKind::BinaryFont
+            | crate::buildsystem::DataKind::Any => sink_path
+                .extension()
+                .map(|ext| ext.to_string_lossy().to_string())
+                .or_else(|| {
+                    Path::new(source_filename)
+                        .extension()
+                        .map(|ext| ext.to_string_lossy().to_string())
+                })
+                .unwrap_or_else(|| "bin".to_string()),
+        };
+        let chain = op_chain
+            .iter()
+            .map(|component| Self::sanitize_debug_component(component))
+            .collect::<Vec<_>>()
+            .join("-");
+        directory
+            .join(format!("{source_name}-{chain}.{extension}"))
+            .to_string_lossy()
+            .to_string()
+    }
+
+    fn default_output_for_kind(
+        &self,
+        source_filename: &str,
+        sink_filename: &str,
+        op_chain: &[String],
+        kind: crate::buildsystem::DataKind,
+    ) -> OperationOutput {
+        if self.debug_intermediates && !op_chain.is_empty() {
+            return RawOperationOutput::from(
+                self.debug_filename(source_filename, sink_filename, op_chain, kind)
+                    .as_str(),
+            )
+            .into();
+        }
+
+        match kind {
+            crate::buildsystem::DataKind::Path => RawOperationOutput::TemporaryFile(None).into(),
+            crate::buildsystem::DataKind::Bytes
+            | crate::buildsystem::DataKind::BinaryFont
+            | crate::buildsystem::DataKind::Any
+            | crate::buildsystem::DataKind::SourceFont => {
+                RawOperationOutput::InMemoryBytes(Vec::new()).into()
+            }
         }
     }
 
@@ -67,40 +154,31 @@ impl BuildGraph {
         source_filename: &str,
         operations: Vec<(Option<S>, BuildStep)>,
         sink_filename: &str,
-    ) -> Vec<NodeIndex> {
+    ) -> AddedPath {
         use crate::buildsystem::operation::DataKind;
         let mut current_node = self.source;
-        // Track the current data kind flowing out of current_node (slot 0)
-        let mut current_kind: DataKind = DataKind::Path; // source produces paths
-
-        // Track the operation nodes we add (not including converters)
+        let mut current_kind: DataKind = DataKind::Path;
         let mut op_nodes: Vec<NodeIndex> = Vec::new();
+        let mut entry_node: Option<NodeIndex> = None;
+        let mut debug_chain: Vec<String> = Vec::new();
 
         for (index, (input_filename, op)) in operations.into_iter().enumerate() {
-            // Determine default output placeholder based on current_kind
-            let default_output_for_kind = |k: DataKind| -> OperationOutput {
-                match k {
-                    DataKind::Path => RawOperationOutput::TemporaryFile(None).into(),
-                    DataKind::Bytes => RawOperationOutput::InMemoryBytes(Vec::new()).into(),
-                    _ => RawOperationOutput::InMemoryBytes(Vec::new()).into(),
-                }
-            };
-
-            // If this is the first step and an explicit file is provided, override
             let computed_output: OperationOutput = if let Some(input_filename) = input_filename {
                 RawOperationOutput::from(input_filename.as_ref()).into()
             } else if index == 0 {
                 RawOperationOutput::from(source_filename).into()
             } else {
-                default_output_for_kind(current_kind)
+                self.default_output_for_kind(
+                    source_filename,
+                    sink_filename,
+                    &debug_chain,
+                    current_kind,
+                )
             };
 
-            let is_source = current_node == self.source;
+            let started_at_source = current_node == self.source;
 
-            // If this node already has outgoing edges, reuse their output to broadcast
-            // to any new downstream operations — except for the Source node, which must
-            // keep per-source outputs distinct.
-            let broadcast_output = if is_source {
+            let mut broadcast_output = if started_at_source {
                 computed_output.clone()
             } else {
                 self.graph
@@ -110,17 +188,12 @@ impl BuildGraph {
                     .unwrap_or_else(|| computed_output.clone())
             };
 
-            // Insert conversion if needed based on op's declared input kind
             let want_kind = op.input_kinds().first().cloned().unwrap_or(DataKind::Any);
             let need_conversion = !(want_kind == DataKind::Any || want_kind == current_kind);
             if need_conversion {
-                // Determine a simple conversion path for now
                 let conv: Option<(Box<dyn Operation>, DataKind)> = match (current_kind, want_kind) {
                     (DataKind::Path, DataKind::Bytes) => {
                         Some((Box::new(FileToBytes), DataKind::Bytes))
-                    }
-                    (DataKind::Bytes, DataKind::Path) => {
-                        Some((Box::new(BytesToTempFile), DataKind::Path))
                     }
                     (DataKind::Path, DataKind::SourceFont) => {
                         Some((Box::new(PathToSourceFont), DataKind::SourceFont))
@@ -128,26 +201,25 @@ impl BuildGraph {
                     _ => None,
                 };
                 if let Some((conv_op, new_kind)) = conv {
-                    // Check if there's already a converter of this type from current_node
+                    let conv_shortname = conv_op.identifier();
                     let existing_conv = self
                         .graph
                         .edges_directed(current_node, petgraph::Direction::Outgoing)
                         .find(|edge| {
                             if let Some(node_op) = self.graph.node_weight(edge.target()) {
-                                node_op.shortname() == conv_op.shortname()
-                            } else {
-                                false
+                                if node_op.shortname() == conv_op.shortname() {
+                                    return !started_at_source
+                                        || edge.weight().output.value_eq(&computed_output);
+                                }
                             }
+                            false
                         })
                         .map(|edge| edge.target());
 
                     let conv_node = if let Some(existing) = existing_conv {
-                        // Reuse existing converter
                         existing
                     } else {
-                        // Add new conversion node
                         let new_conv_node = self.graph.add_node(Arc::new(conv_op));
-                        // Edge from current_node to converter uses the broadcast output
                         self.graph.update_edge(
                             current_node,
                             new_conv_node,
@@ -159,22 +231,40 @@ impl BuildGraph {
                         new_conv_node
                     };
 
-                    // Advance current node and kind
+                    if entry_node.is_none() && current_node == self.source {
+                        entry_node = Some(conv_node);
+                    }
+
                     current_node = conv_node;
                     current_kind = new_kind;
+                    debug_chain.push(conv_shortname);
+                    broadcast_output = self
+                        .graph
+                        .edges_directed(current_node, petgraph::Direction::Outgoing)
+                        .next()
+                        .map(|edge| edge.weight().output.clone())
+                        .unwrap_or_else(|| {
+                            self.default_output_for_kind(
+                                source_filename,
+                                sink_filename,
+                                &debug_chain,
+                                current_kind,
+                            )
+                        });
                 }
             }
 
-            // Check if there's already an outgoing edge to the same operation.
-            // For the Source node we also require the same output (file) to avoid
-            // collapsing different source files.
+            let op_shortname = op.identifier();
+            let is_source = current_node == self.source;
+
             if let Some(existing_node) = self
                 .graph
                 .edges_directed(current_node, petgraph::Direction::Outgoing)
                 .find(|edge| {
-                    let same_op = self.graph[edge.target()] == op;
+                    let target_op = &self.graph[edge.target()];
+                    let same_op = target_op.identifier() == op.identifier();
                     if is_source {
-                        same_op && edge.weight().output == computed_output
+                        same_op && edge.weight().output.value_eq(&computed_output)
                     } else {
                         same_op
                     }
@@ -182,10 +272,13 @@ impl BuildGraph {
                 .map(|edge| edge.target())
             {
                 current_node = existing_node;
-                // Still track this as an operation node for the path
                 op_nodes.push(existing_node);
+                debug_chain.push(op_shortname);
 
-                // Update current_kind to match the existing node's output kind
+                if entry_node.is_none() && current_node == self.source {
+                    entry_node = Some(existing_node);
+                }
+
                 if let Some(ok) = self
                     .graph
                     .node_weight(existing_node)
@@ -198,19 +291,21 @@ impl BuildGraph {
                 continue;
             }
 
-            // Otherwise, add a new node for this operation using the chosen output.
             let next_node = self.graph.add_node(op);
             let edge = BuildEdge {
                 output: broadcast_output,
-                output_slot: 0, // Default to slot 0 for simple cases
+                output_slot: 0,
             };
             self.graph.update_edge(current_node, next_node, edge);
+
+            if entry_node.is_none() && current_node == self.source {
+                entry_node = Some(next_node);
+            }
+
             current_node = next_node;
-
-            // Track this operation node (not a converter)
             op_nodes.push(next_node);
+            debug_chain.push(op_shortname);
 
-            // Update current_kind to this op's first output kind if specified
             if let Some(ok) = self
                 .graph
                 .node_weight(current_node)
@@ -253,8 +348,10 @@ impl BuildGraph {
         self.target_nodes
             .insert(sink_filename.to_string(), current_node);
 
-        // Return the list of operation nodes added (in order)
-        op_nodes
+        AddedPath {
+            entry_node: entry_node.unwrap_or(sink_node),
+            op_nodes,
+        }
     }
 
     /// Add a dependency from a target to a node that needs it as an additional input.
@@ -292,17 +389,36 @@ impl BuildGraph {
             ))
         })?;
 
-        // Get the output that the producer creates (from any existing edge, or construct it)
-        let producer_output = self
+        // A dependency can be requested multiple times when different recipe targets
+        // share the same operation node (e.g. VF target + VF webfont target sharing
+        // BuildStat). Once target_nodes has been updated to point at dependent_node,
+        // a duplicate call would try to wire dependent_node -> dependent_node,
+        // introducing a self-cycle. Treat this as already satisfied.
+        if *producer_node == dependent_node {
+            return Ok(());
+        }
+
+        // Get the specific output that produces this target.
+        let (producer_output, _producer_output_slot) = self
             .graph
             .edges_directed(*producer_node, petgraph::Direction::Outgoing)
-            .next()
-            .map(|edge| edge.weight().output.clone())
-            .unwrap_or_else(|| RawOperationOutput::from(target_name).into());
+            .find_map(|edge| {
+                edge.weight()
+                    .output
+                    .lock()
+                    .ok()
+                    .and_then(|output| match &*output {
+                        RawOperationOutput::NamedFile(name) if name == target_name => {
+                            Some((edge.weight().output.clone(), edge.weight().output_slot))
+                        }
+                        _ => None,
+                    })
+            })
+            .unwrap_or_else(|| (RawOperationOutput::from(target_name).into(), 0));
 
         // Add input edge from producer to dependent, specifying the input slot
         let input_edge = BuildEdge {
-            output: producer_output.clone(),
+            output: producer_output,
             output_slot: input_slot,
         };
         self.graph
@@ -318,8 +434,9 @@ impl BuildGraph {
                 if let Some(node_weight) = self.graph.node_weight(edge.target())
                     && node_weight.shortname() == "Sink"
                 {
-                    // Check if the output filename matches our target
-                    if let Ok(filename) = edge.weight().output.to_filename(None) {
+                    if let Ok(output) = edge.weight().output.lock()
+                        && let RawOperationOutput::NamedFile(filename) = &*output
+                    {
                         return filename == target_name;
                     }
                 }
@@ -343,6 +460,53 @@ impl BuildGraph {
             self.graph
                 .update_edge(dependent_node, sink_node, output_edge);
         }
+
+        if self.target_nodes.contains_key(target_name) {
+            self.target_nodes
+                .insert(target_name.to_string(), dependent_node);
+        }
+
+        Ok(())
+    }
+
+    pub fn add_source_dependency(
+        &mut self,
+        target_name: &str,
+        dependent_node: NodeIndex,
+    ) -> Result<(), ApplicationError> {
+        let Some(producer_node) = self.target_nodes.get(target_name).copied() else {
+            return Ok(());
+        };
+
+        let (producer_output, producer_output_slot) = self
+            .graph
+            .edges_directed(producer_node, petgraph::Direction::Outgoing)
+            .find_map(|edge| {
+                edge.weight()
+                    .output
+                    .lock()
+                    .ok()
+                    .and_then(|output| match &*output {
+                        RawOperationOutput::NamedFile(name) if name == target_name => {
+                            Some((edge.weight().output.clone(), edge.weight().output_slot))
+                        }
+                        _ => None,
+                    })
+            })
+            .unwrap_or_else(|| (RawOperationOutput::from(target_name).into(), 0));
+
+        if let Some(edge_idx) = self.graph.find_edge(self.source, dependent_node) {
+            self.graph.remove_edge(edge_idx);
+        }
+
+        self.graph.update_edge(
+            producer_node,
+            dependent_node,
+            BuildEdge {
+                output: producer_output,
+                output_slot: producer_output_slot,
+            },
+        );
 
         Ok(())
     }
@@ -381,7 +545,7 @@ impl BuildGraph {
         Ok(svg_contents)
     }
 
-    pub fn ascii(&self) -> Result<String, ApplicationError> {
+    pub fn ascii(&self, verbosity: log::Level) -> Result<String, ApplicationError> {
         // In ascii_dag we can't put a label on an edge. To get around that,
         // we create another petgraph where as well as the original nodes,
         // each edge in self.graph becomes a node, and we add edges from
@@ -395,7 +559,11 @@ impl BuildGraph {
         }
         // Now let's add nodes for the edges
         for edge in self.graph.raw_edges() {
-            let edge_node = graph.add_node(format!("{}", edge.weight.output));
+            let edge_node = if verbosity >= log::Level::Debug {
+                graph.add_node(format!("{:?}", edge.weight.output))
+            } else {
+                graph.add_node(format!("{}", edge.weight.output))
+            };
             graph.add_edge(edge.source(), edge_node, ());
             graph.add_edge(edge_node, edge.target(), ());
         }
@@ -418,6 +586,16 @@ impl BuildGraph {
 
 impl Default for BuildGraph {
     fn default() -> Self {
-        Self::new()
+        Self::new(false)
+    }
+}
+
+impl OperationOutput {
+    fn value_eq(&self, other: &Self) -> bool {
+        if let (Ok(a), Ok(b)) = (self.lock(), other.lock()) {
+            *a == *b
+        } else {
+            false
+        }
     }
 }

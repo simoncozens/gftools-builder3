@@ -9,7 +9,7 @@ use crate::{
     operations::OpStep,
     recipe_providers::{
         googlefonts::{GoogleFontsOptions, GoogleFontsProvider},
-        noto::{NotoFontsOptions, NotoProvider},
+        noto::{NotoOptions, NotoProvider},
     },
 };
 
@@ -49,7 +49,7 @@ fn parse_provider_options(
             Ok(Box::new(GoogleFontsProvider::new(options)))
         }
         RecipeProviderTag::Noto => {
-            let options: NotoFontsOptions =
+            let options: NotoOptions =
                 serde_yaml_ng::from_value(raw_config.clone()).map_err(|e| {
                     ApplicationError::InvalidRecipe(format!(
                         "Failed to parse Noto provider options: {}",
@@ -135,12 +135,13 @@ impl Recipe {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
-    pub fn to_graph(&self) -> Result<BuildGraph, ApplicationError> {
+    pub fn to_graph(&self, debug_intermediates: bool) -> Result<BuildGraph, ApplicationError> {
         let _span = info_span!("generate_graph").entered();
-        let mut graph = BuildGraph::new();
+        let mut graph = BuildGraph::new(debug_intermediates);
 
         // Track dependencies: (step_node, needs_targets)
         let mut dependencies: Vec<(petgraph::graph::NodeIndex, Vec<String>)> = Vec::new();
+        let mut source_dependencies: Vec<(petgraph::graph::NodeIndex, String)> = Vec::new();
 
         for (target, operation) in self.0.iter() {
             // First operation must be a source step
@@ -169,12 +170,14 @@ impl Recipe {
                 .collect();
 
             // Add the path and get the nodes for each step
-            let step_nodes = graph.add_path(source_filename, operations_for_path, target);
+            let added_path = graph.add_path(source_filename, operations_for_path, target);
+
+            source_dependencies.push((added_path.entry_node, source_filename.to_string()));
 
             // Record dependencies with their corresponding nodes
             for (step_idx, (_, _, needs)) in operations.iter().enumerate() {
-                if !needs.is_empty() && step_idx < step_nodes.len() {
-                    dependencies.push((step_nodes[step_idx], needs.clone()));
+                if !needs.is_empty() && step_idx < added_path.op_nodes.len() {
+                    dependencies.push((added_path.op_nodes[step_idx], needs.clone()));
                 }
             }
         }
@@ -185,6 +188,10 @@ impl Recipe {
                 // Input slot starts at 1 because slot 0 is the primary input from the path
                 graph.add_dependency(need_target, target_node, slot + 1)?;
             }
+        }
+
+        for (target_node, source_target) in source_dependencies {
+            graph.add_source_dependency(&source_target, target_node)?;
         }
 
         Ok(graph)

@@ -27,6 +27,15 @@ struct Args {
     graph: bool,
     #[clap(long)]
     ascii_graph: bool,
+    /// Keep named intermediate files for debugging instead of anonymous temporaries/in-memory edges
+    #[clap(long)]
+    debug: bool,
+    /// Disable progress bars
+    #[clap(long)]
+    no_progress: bool,
+    /// Limit number of parallel jobs (defaults to number of CPU cores)
+    #[clap(long)]
+    jobs: Option<usize>,
     config_file: String,
 }
 
@@ -55,7 +64,7 @@ async fn main() {
         .filter_level(args.verbosity.into())
         .init();
 
-    let job_limit = num_cpus::get();
+    let job_limit = args.jobs.unwrap_or_else(num_cpus::get);
     log::info!("Starting gftools-builder with {} parallel jobs", job_limit);
 
     let build_config = BuildConfig {
@@ -65,6 +74,9 @@ async fn main() {
         #[cfg(feature = "graphviz")]
         draw_graph: args.graph,
         ascii_graph: args.ascii_graph,
+        debug_intermediates: args.debug,
+        verbosity: args.verbosity.log_level().unwrap_or(log::Level::Info),
+        progress: !args.no_progress,
     };
 
     if let Err(error) = build(build_config).await {

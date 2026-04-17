@@ -209,7 +209,18 @@ impl OperationOutput {
     /// whereas `set_contents` will write to a named file if the output is a named file.
     pub fn set_bytes(&self, bytes: Vec<u8>) -> Result<(), ApplicationError> {
         let mut f = self.lock().map_err(|_| ApplicationError::MutexPoisoned)?;
-        *f = RawOperationOutput::InMemoryBytes(bytes);
+        match &mut *f {
+            RawOperationOutput::NamedFile(name) => {
+                std::fs::write(&*name, bytes).map_err(|e| ApplicationError::Other(e.to_string()))?;
+            }
+            RawOperationOutput::TemporaryFile(Some(temp_file)) => {
+                std::fs::write(temp_file.path(), bytes)
+                    .map_err(|e| ApplicationError::Other(e.to_string()))?;
+            }
+            _ => {
+                *f = RawOperationOutput::InMemoryBytes(bytes);
+            }
+        }
         Ok(())
     }
 
@@ -309,7 +320,19 @@ impl OperationOutput {
     /// Set the OperationOutput to contain a SourceFont.
     pub fn set_font_source(&self, font: Box<babelfont::Font>) -> Result<(), ApplicationError> {
         let mut f = self.lock().map_err(|_| ApplicationError::MutexPoisoned)?;
-        *f = RawOperationOutput::SourceFont(font);
+        match &mut *f {
+            RawOperationOutput::NamedFile(name) => {
+                font.save(&*name)
+                    .map_err(|e| ApplicationError::Other(e.to_string()))?;
+            }
+            RawOperationOutput::TemporaryFile(Some(temp_file)) => {
+                font.save(temp_file.path())
+                    .map_err(|e| ApplicationError::Other(e.to_string()))?;
+            }
+            _ => {
+                *f = RawOperationOutput::SourceFont(font);
+            }
+        }
         Ok(())
     }
 }

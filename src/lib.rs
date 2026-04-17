@@ -24,6 +24,12 @@ pub struct BuildConfig {
     pub draw_graph: bool,
     /// Generate ASCII graph
     pub ascii_graph: bool,
+    /// Materialize intermediate outputs as named files for debugging
+    pub debug_intermediates: bool,
+    // Verbosity level for logging
+    pub verbosity: log::Level,
+    /// Whether to show progress bars
+    pub progress: bool,
 }
 
 impl Default for BuildConfig {
@@ -35,6 +41,9 @@ impl Default for BuildConfig {
             #[cfg(feature = "graphviz")]
             draw_graph: false,
             ascii_graph: false,
+            debug_intermediates: false,
+            verbosity: log::Level::Info,
+            progress: true,
         }
     }
 }
@@ -82,15 +91,19 @@ pub fn generate_recipe(config: &Config) -> Result<String, ApplicationError> {
 }
 
 /// Generate an ASCII graph of the build process
-pub fn generate_ascii_graph(recipe: &Recipe) -> Result<String, ApplicationError> {
-    let graph = recipe.to_graph()?;
-    graph.ascii()
+pub fn generate_ascii_graph(
+    recipe: &Recipe,
+    verbosity: log::Level,
+    debug_intermediates: bool,
+) -> Result<String, ApplicationError> {
+    let graph = recipe.to_graph(debug_intermediates)?;
+    graph.ascii(verbosity)
 }
 
 /// Generate an SVG graph of the build process
 #[cfg(feature = "graphviz")]
 pub fn generate_svg_graph(recipe: &Recipe) -> Result<String, ApplicationError> {
-    let graph = recipe.to_graph()?;
+    let graph = recipe.to_graph(false)?;
     graph.draw()
 }
 
@@ -139,18 +152,20 @@ pub async fn build(config: BuildConfig) -> Result<(), ApplicationError> {
         return Ok(());
     }
 
-    if config.ascii_graph {
-        let graph = generate_ascii_graph(&recipe)?;
+    // We'll always generate an ASCII graph even if the user doesn't ask
+    // for one, because generate_ascii_graph has a nice cycle detector.
+    let graph = generate_ascii_graph(&recipe, config.verbosity, config.debug_intermediates)?;
+    if config.ascii_graph || graph.starts_with("⚠️") {
         println!("{graph}");
         return Ok(());
     }
 
     // Use the config to create a build graph
-    let graph = recipe.to_graph()?;
+    let graph = recipe.to_graph(config.debug_intermediates)?;
     graph.ensure_directories()?;
 
     // Run the build
-    buildsystem::run(graph, config.job_limit).await?;
+    buildsystem::run(graph, config.job_limit, config.progress).await?;
 
     Ok(())
 }
