@@ -17,7 +17,7 @@ use petgraph::{
     visit::EdgeRef,
 };
 use std::{
-    collections::HashSet, error::Error, future::Future, pin::Pin, process::Output, sync::Arc,
+    collections::HashSet, env, error::Error, future::Future, pin::Pin, process::Output, sync::Arc,
 };
 use tokio::{
     io::{AsyncWriteExt, stderr, stdout},
@@ -45,6 +45,32 @@ impl Configuration {
 
 type RawBuildFuture = Pin<Box<dyn Future<Output = Result<(), ApplicationError>> + Send>>;
 pub(crate) type BuildFuture = Shared<RawBuildFuture>;
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum ProgressMode {
+    Disabled,
+    PerTarget,
+    Aggregate,
+}
+
+fn terminal_rows() -> usize {
+    env::var("LINES")
+        .ok()
+        .and_then(|lines| lines.parse::<usize>().ok())
+        .filter(|rows| *rows > 0)
+        .unwrap_or(24) // all terminals are 24 rows, right?
+}
+
+fn select_progress_mode(progress: bool, target_count: usize) -> ProgressMode {
+    println!("Rows: {}, Targets: {}, Progress: {}", terminal_rows(), target_count, progress);
+    if !progress {
+        ProgressMode::Disabled
+    } else if terminal_rows() < target_count {
+        ProgressMode::Aggregate
+    } else {
+        ProgressMode::PerTarget
+    }
+}
 
 /// Helper function to get final sink target filenames for a given node index.
 /// This traces through outgoing edges until it reaches Sink nodes and returns the named
@@ -87,23 +113,50 @@ pub async fn run(
     job_limit: usize,
     progress: bool,
 ) -> Result<(), ApplicationError> {
+    let target_count = graph.target_nodes.len();
+    let progress_mode = select_progress_mode(progress, target_count);
     let configuration = Configuration::new(graph);
-    let context = Arc::new(Context::new(job_limit, Arc::new(configuration), progress));
+    let context = Arc::new(Context::new(
+        job_limit,
+        Arc::new(configuration),
+        progress,
+        progress_mode,
+        target_count,
+    ));
+    let mut target_futures = Vec::with_capacity(target_count);
+
     for (name, target_node) in &context.configuration.graph().target_nodes {
         trigger_build(context.clone(), *target_node).await?;
-        if progress {
+        if matches!(context.progress_mode, ProgressMode::PerTarget) {
             context.add_progressbar(*target_node, name);
         }
+
+        let build_future = context
+            .build_futures
+            .get(target_node)
+            .ok_or(ApplicationError::Build)?
+            .value()
+            .clone();
+
+        target_futures.push((name.clone(), build_future));
     }
 
-    // Do not inline this to avoid borrowing a lock of builds.
-    let futures = context
-        .build_futures
-        .iter()
-        .map(|r#ref| r#ref.value().clone())
-        .collect::<Vec<_>>();
-
-    let result = try_join_all(futures).await;
+    let result = match context.progress_mode {
+        ProgressMode::Aggregate => {
+            try_join_all(target_futures.into_iter().map(|(name, build_future)| {
+                let context = context.clone();
+                async move {
+                    build_future.await?;
+                    context.finish_target_progress(&name);
+                    Ok::<(), ApplicationError>(())
+                }
+            }))
+            .await
+        }
+        ProgressMode::Disabled | ProgressMode::PerTarget => {
+            try_join_all(target_futures.into_iter().map(|(_, build_future)| build_future)).await
+        }
+    };
 
     result.map(|_| ())
 }
@@ -187,18 +240,17 @@ async fn spawn_build(context: Arc<Context>, index: NodeIndex) -> Result<(), Appl
             // OK, we are ready.
             run_op(&context, build, &input_files, &output_files, &targets).await?;
 
-            // Advance progress bars for all targets reachable from this build step.
-            if context.progress {
-            let op_desc = build.shortname().to_string();
-            for edge in context
-                .configuration
-                .graph()
-                .edges_directed(index, Direction::Outgoing)
-            {
-                context.step_progressbar(edge, &op_desc);
+            if matches!(context.progress_mode, ProgressMode::PerTarget) {
+                let op_desc = build.shortname().to_string();
+                for edge in context
+                    .configuration
+                    .graph()
+                    .edges_directed(index, Direction::Outgoing)
+                {
+                    context.step_progressbar(edge, &op_desc);
+                }
             }
 
-        }
             Ok::<(), ApplicationError>(())
         }
         .instrument(span)
@@ -312,20 +364,48 @@ pub struct Context {
     pub configuration: Arc<Configuration>,
     pub build_futures: DashMap<NodeIndex, BuildFuture>,
     pub progress: bool,
+    progress_mode: ProgressMode,
     pub progressbars: MultiProgress,
+    aggregate_progress_bar: Option<indicatif::ProgressBar>,
     pub progress_bar_for_target: DashMap<NodeIndex, indicatif::ProgressBar>,
     pub edges_to_final_target_nodes: DashMap<EdgeIndex, Vec<NodeIndex>>,
 }
 
 impl Context {
-    pub fn new(job_limit: usize, configuration: Arc<Configuration>, progress: bool) -> Self {
+    pub(crate) fn new(
+        job_limit: usize,
+        configuration: Arc<Configuration>,
+        progress: bool,
+        progress_mode: ProgressMode,
+        total_targets: usize,
+    ) -> Self {
+        let progressbars = MultiProgress::new();
+        let aggregate_progress_bar = if matches!(progress_mode, ProgressMode::Aggregate) {
+            let sty = ProgressStyle::with_template(
+                "{prefix:40!} {wide_bar:.cyan/blue} {pos}/{len} {msg:10!}",
+            )
+            .unwrap();
+
+            let pb = progressbars
+                .add(ProgressBar::new(total_targets as u64))
+                .with_finish(indicatif::ProgressFinish::Abandon);
+            pb.set_style(sty);
+            pb.set_prefix("targets".to_string());
+
+            Some(pb)
+        } else {
+            None
+        };
+
         Self {
             command_semaphore: Semaphore::new(job_limit),
             console: Mutex::new(()),
             configuration,
             build_futures: DashMap::new(),
             progress,
-            progressbars: MultiProgress::new(),
+            progress_mode,
+            progressbars,
+            aggregate_progress_bar,
             progress_bar_for_target: DashMap::new(),
             edges_to_final_target_nodes: DashMap::new(),
         }
@@ -336,6 +416,10 @@ impl Context {
     }
 
     pub fn add_progressbar(&self, target: NodeIndex, name: &str) {
+        if !matches!(self.progress_mode, ProgressMode::PerTarget) {
+            return;
+        }
+
         // Walk the graph backwards to count steps for this target
         let mut steps = 0;
         let mut node = target;
@@ -370,6 +454,10 @@ impl Context {
     }
 
     pub fn step_progressbar(&self, op_step: EdgeReference<BuildEdge>, op_desc: &str) {
+        if !matches!(self.progress_mode, ProgressMode::PerTarget) {
+            return;
+        }
+
         // Find the final target(s) for this op, and increment it
         let target_nodes = self
             .edges_to_final_target_nodes
@@ -381,6 +469,16 @@ impl Context {
             if let Some(pb) = self.progress_bar_for_target.get(&target_node) {
                 pb.set_message(op_desc.to_string());
                 pb.inc(1);
+            }
+        }
+    }
+
+    pub fn finish_target_progress(&self, name: &str) {
+        if let Some(pb) = &self.aggregate_progress_bar {
+            pb.set_message(name.rsplit('/').next().unwrap_or(name).to_string());
+            pb.inc(1);
+            if pb.position() >= pb.length().unwrap_or_default() {
+                pb.finish();
             }
         }
     }
