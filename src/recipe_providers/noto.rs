@@ -176,13 +176,14 @@ impl NotoProvider {
         Ok(recipe)
     }
 
-    fn build_all_statics(&mut self) -> Result<(), ApplicationError> {
+    fn build_all_statics(&mut self, have_variables: bool) -> Result<(), ApplicationError> {
         if !self.options.build_static {
             return Ok(());
         }
         for source in self.sources.iter() {
             for instance in source.instances.iter() {
-                self.recipe.extend(self.build_a_static(source, instance)?);
+                self.recipe
+                    .extend(self.build_a_static(source, instance, have_variables)?);
             }
         }
         Ok(())
@@ -192,6 +193,7 @@ impl NotoProvider {
         &self,
         source: &Font,
         instance: &Instance,
+        have_variables: bool,
     ) -> Result<Recipe, ApplicationError> {
         let mut recipe = Recipe::new();
 
@@ -284,12 +286,15 @@ impl NotoProvider {
             recipe.insert(full_target, full_builder.clone().autohint().build());
 
             // Googlefonts static: addSubset + compile + instance + autohint + fix
-            let googlefonts_target =
-                Self::static_target(&familyname_path, "googlefonts", &instancebase);
-            let mut gf_builder = full_builder.autohint();
-            gf_builder = gf_builder.fix(&self.options.fix_config);
-            recipe.insert(googlefonts_target, gf_builder.build());
-        } else {
+            if !have_variables {
+                // Only build statics for GF if we don't have a variable
+                let googlefonts_target =
+                    Self::static_target(&familyname_path, "googlefonts", &instancebase);
+                let mut gf_builder = full_builder.autohint();
+                gf_builder = gf_builder.fix(&self.options.fix_config);
+                recipe.insert(googlefonts_target, gf_builder.build());
+            }
+        } else if !have_variables {
             // Googlefonts static without subset: compile + instance + autohint + fix
             let googlefonts_target =
                 Self::static_target(&familyname_path, "googlefonts", &instancebase);
@@ -366,7 +371,8 @@ impl Provider for NotoProvider {
         provider.load_all_sources()?;
         provider.resolve_subset_steps()?;
         provider.build_all_variables()?;
-        provider.build_all_statics()?;
+        let have_variables = !provider.recipe.is_empty();
+        provider.build_all_statics(have_variables)?;
         Ok(provider.recipe)
     }
 }
