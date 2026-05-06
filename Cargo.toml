@@ -22,10 +22,8 @@ clap = "4.5.40"
 dashmap = "6.1.0"
 env_logger = "0.11"
 fontc = { git = "https://github.com/googlefonts/fontc", version = "0.6.0" }
-skera = { path = "/Users/simon/others-repos/fontations/skera" }
-read-fonts = { path = "/Users/simon/others-repos/fontations/read-fonts" }
-# skera = { git = "https://github.com/googlefonts/fontations", branch = "skera-variations-final" }
-# read-fonts = { git = "https://github.com/googlefonts/fontations", branch = "skera-variations-final" }
+skera = { git = "https://github.com/googlefonts/fontations", branch = "skera-variations-final" }
+read-fonts = { git = "https://github.com/googlefonts/fontations", branch = "skera-variations-final" }
 futures = "0.3"
 google-fonts-axisregistry = { git = "https://github.com/googlefonts/axisregistry", features = [
     "fontations",

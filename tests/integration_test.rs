@@ -69,6 +69,9 @@ async fn test_radio_canada_build() {
         #[cfg(feature = "graphviz")]
         draw_graph: false,
         ascii_graph: false,
+        debug_intermediates: false,
+        verbosity: log::Level::Error,
+        progress: false,
     };
 
     // Run the build
@@ -148,6 +151,9 @@ async fn test_radio_canada_generate_recipe() {
         #[cfg(feature = "graphviz")]
         draw_graph: false,
         ascii_graph: false,
+        debug_intermediates: false,
+        verbosity: log::Level::Error,
+        progress: false,
     };
 
     // Run recipe generation (should just print, not build)
@@ -192,6 +198,9 @@ async fn test_radio_canada_ascii_graph() {
         #[cfg(feature = "graphviz")]
         draw_graph: false,
         ascii_graph: true,
+        debug_intermediates: false,
+        verbosity: log::Level::Error,
+        progress: false,
     };
 
     // Run ASCII graph generation

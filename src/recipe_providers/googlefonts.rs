@@ -40,7 +40,7 @@ impl FontFormat {
 #[derive(Debug, Clone)]
 pub(crate) struct ItalicDescriptor {
     axis_tag: String,
-    min_value: UserCoord,
+    // min_value: UserCoord,
     max_value: UserCoord,
 }
 
@@ -509,11 +509,11 @@ impl GoogleFontsProvider {
     fn has_slant_italic(&self, source: &Font) -> Option<ItalicDescriptor> {
         for axis in &source.axes {
             if axis.tag == "ital"
-                && let Some((min, _, max)) = axis.bounds()
+                && let Some((_min, _, max)) = axis.bounds()
             {
                 return Some(ItalicDescriptor {
                     axis_tag: axis.tag.to_string(),
-                    min_value: min,
+                    // min_value: min,
                     max_value: max,
                 });
             }
@@ -521,11 +521,11 @@ impl GoogleFontsProvider {
 
         for axis in &source.axes {
             if axis.tag == "slnt"
-                && let Some((min, _, max)) = axis.bounds()
+                && let Some((min, _, _max)) = axis.bounds()
             {
                 return Some(ItalicDescriptor {
                     axis_tag: axis.tag.to_string(),
-                    min_value: max,
+                    // min_value: max,
                     max_value: min,
                 });
             }

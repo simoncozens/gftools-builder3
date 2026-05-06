@@ -67,9 +67,9 @@ impl ConfigOperationBuilder {
         ConfigOperationBuilder { steps: vec![] }
     }
 
-    pub(crate) fn new_from_steps(steps: Vec<Step>) -> Self {
-        ConfigOperationBuilder { steps }
-    }
+    // pub(crate) fn new_from_steps(steps: Vec<Step>) -> Self {
+    //     ConfigOperationBuilder { steps }
+    // }
 
     pub fn build(self) -> ConfigOperation {
         ConfigOperation(self.steps)
