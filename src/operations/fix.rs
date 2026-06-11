@@ -57,6 +57,7 @@ impl Operation for Fix {
             &inputs[0].to_filename(Some(".ttf"))?,
             &outputs[0].to_filename(Some(".ttf"))?,
             self.config.include_source_fixes,
+            false,
         ) {
             Ok(()) => Ok(Output {
                 status: std::process::ExitStatus::from_raw(0),
