@@ -356,14 +356,18 @@ impl GoogleFontsProvider {
         }
         for source in self.sources.iter() {
             for instance in source.instances.iter() {
-                let recipe = self.build_a_static(source, instance, FontFormat::TTF)?;
+                let recipe = if source.masters.len() > 1  {
+                    self.instantiate_a_static(source, instance, FontFormat::TTF)?
+                } else {
+                    self.build_a_static(source, instance, FontFormat::TTF)?
+                };
                 self.recipe.extend(recipe);
             }
         }
         Ok(())
     }
 
-    fn build_a_static(
+    fn instantiate_a_static(
         &self,
         source: &Font,
         instance: &Instance,
@@ -457,7 +461,6 @@ impl GoogleFontsProvider {
                 .unwrap_or(&"Unknown family".to_string())
         );
         let mut recipe = Recipe::new();
-        // Implementation for building a variable font
         let target = self.options.vf_filename(
             source,
             self.options.filename_suffix.as_deref(),
@@ -495,6 +498,67 @@ impl GoogleFontsProvider {
                 italic_ds,
                 roman,
             )?;
+            log::debug!(" Building webfont target: {}", webfont_target);
+            let webfont_builder = builder.clone().compress();
+            recipe.insert(webfont_target, webfont_builder.build());
+        }
+
+        // Smallcaps go here
+
+        recipe.insert(target, builder.build());
+        Ok(recipe)
+    }
+
+
+    fn build_a_static(
+        &self,
+        source: &Font,
+        instance: &Instance,
+        _format: FontFormat,
+    ) -> Result<Recipe, ApplicationError> {
+        log::debug!(
+            "Considering how to build static font from single master source {}",
+            source
+                .names
+                .family_name
+                .get_default()
+                .unwrap_or(&"Unknown family".to_string())
+        );
+        let mut recipe = Recipe::new();
+        let family_name = source
+            .names
+            .family_name
+            .get_default()
+            .unwrap_or(&"Unknown".to_string())
+            .replace(" ", "");
+        let style_name = instance.name.get_default().unwrap_or(&"Regular".to_string()).replace(" ", "");
+        let instance_base = format!("{}-{}", family_name, style_name);
+
+        let target = self.options.static_filename(&instance_base, self.options.filename_suffix.as_deref(), None);
+        log::debug!("Static target filename: {}", target);
+
+        let mut builder = ConfigOperationBuilder::new();
+        builder = builder.source(
+            source
+                .source
+                .as_ref()
+                .unwrap()
+                .to_string_lossy()
+                .to_string(),
+        );
+        builder = self.add_subset_steps(builder)?;
+        builder = builder.compile(&self.options.fontc_config);
+        // Any post-compile steps
+        // Any VTT steps
+        // If italic, subspace the axes according to style
+
+        builder = builder.fix(&self.options.fix_config);
+        if self.options.build_webfont {
+            let webfont_target = self.options.static_filename(
+                &instance_base,
+                self.options.filename_suffix.as_deref(),
+                Some("woff2"),
+            );
             log::debug!(" Building webfont target: {}", webfont_target);
             let webfont_builder = builder.clone().compress();
             recipe.insert(webfont_target, webfont_builder.build());
