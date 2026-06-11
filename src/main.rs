@@ -10,6 +10,7 @@ use tokio::{
 use tracing_subscriber::{EnvFilter, prelude::*};
 
 #[derive(clap::Parser)]
+#[command(version, about)]
 struct Args {
     /// Increase logging
     #[command(flatten)]
