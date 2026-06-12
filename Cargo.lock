@@ -160,7 +160,7 @@ dependencies = [
 [[package]]
 name = "ascii_plist_derive"
 version = "0.2.0"
-source = "git+https://github.com/googlefonts/fontc#ca5d0a6f7150b497c52bdbf7b6d15d1195c0043b"
+source = "git+https://github.com/googlefonts/fontc#070cbeef2405deffbae4d1bc785965f965ec2391"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -226,7 +226,7 @@ dependencies = [
 [[package]]
 name = "babelfont"
 version = "0.2.0-pre"
-source = "git+https://github.com/simoncozens/babelfont-rs#a1a0b5f4640b3303008c1b49046c819820bf4c9d"
+source = "git+https://github.com/simoncozens/babelfont-rs#3b04c555b45bac2e7722ef6749b2a843ddb78d4a"
 dependencies = [
  "chrono",
  "fea-rs-ast",
@@ -1240,7 +1240,7 @@ dependencies = [
 [[package]]
 name = "fea-rs"
 version = "0.22.0"
-source = "git+https://github.com/googlefonts/fontc#ca5d0a6f7150b497c52bdbf7b6d15d1195c0043b"
+source = "git+https://github.com/googlefonts/fontc#070cbeef2405deffbae4d1bc785965f965ec2391"
 dependencies = [
  "ansi_term",
  "env_logger 0.11.10",
@@ -1400,7 +1400,7 @@ dependencies = [
 [[package]]
 name = "fontbe"
 version = "0.5.0"
-source = "git+https://github.com/googlefonts/fontc#ca5d0a6f7150b497c52bdbf7b6d15d1195c0043b"
+source = "git+https://github.com/googlefonts/fontc#070cbeef2405deffbae4d1bc785965f965ec2391"
 dependencies = [
  "bincode",
  "chrono",
@@ -1447,7 +1447,7 @@ dependencies = [
 [[package]]
 name = "fontc"
 version = "0.6.0"
-source = "git+https://github.com/googlefonts/fontc#ca5d0a6f7150b497c52bdbf7b6d15d1195c0043b"
+source = "git+https://github.com/googlefonts/fontc#070cbeef2405deffbae4d1bc785965f965ec2391"
 dependencies = [
  "bitflags",
  "clap",
@@ -1504,7 +1504,7 @@ dependencies = [
 [[package]]
 name = "fontdrasil"
 version = "0.4.0"
-source = "git+https://github.com/googlefonts/fontc#ca5d0a6f7150b497c52bdbf7b6d15d1195c0043b"
+source = "git+https://github.com/googlefonts/fontc#070cbeef2405deffbae4d1bc785965f965ec2391"
 dependencies = [
  "env_logger 0.11.10",
  "kurbo 0.13.1",
@@ -1541,7 +1541,7 @@ dependencies = [
 [[package]]
 name = "fontir"
 version = "0.5.0"
-source = "git+https://github.com/googlefonts/fontc#ca5d0a6f7150b497c52bdbf7b6d15d1195c0043b"
+source = "git+https://github.com/googlefonts/fontc#070cbeef2405deffbae4d1bc785965f965ec2391"
 dependencies = [
  "bitflags",
  "chrono",
@@ -1563,7 +1563,7 @@ dependencies = [
 [[package]]
 name = "fontmerge"
 version = "0.1.0"
-source = "git+https://github.com/simoncozens/babelfont-rs#a1a0b5f4640b3303008c1b49046c819820bf4c9d"
+source = "git+https://github.com/simoncozens/babelfont-rs#3b04c555b45bac2e7722ef6749b2a843ddb78d4a"
 dependencies = [
  "babelfont",
  "clap",
@@ -1602,7 +1602,7 @@ dependencies = [
 [[package]]
 name = "fontra2fontir"
 version = "0.4.0"
-source = "git+https://github.com/googlefonts/fontc#ca5d0a6f7150b497c52bdbf7b6d15d1195c0043b"
+source = "git+https://github.com/googlefonts/fontc#070cbeef2405deffbae4d1bc785965f965ec2391"
 dependencies = [
  "env_logger 0.11.10",
  "fontdrasil 0.4.0 (git+https://github.com/googlefonts/fontc)",
@@ -2127,7 +2127,7 @@ dependencies = [
 [[package]]
 name = "glyphs-reader"
 version = "0.5.0"
-source = "git+https://github.com/googlefonts/fontc#ca5d0a6f7150b497c52bdbf7b6d15d1195c0043b"
+source = "git+https://github.com/googlefonts/fontc#070cbeef2405deffbae4d1bc785965f965ec2391"
 dependencies = [
  "ascii_plist_derive 0.2.0 (git+https://github.com/googlefonts/fontc)",
  "chrono",
@@ -2168,7 +2168,7 @@ dependencies = [
 [[package]]
 name = "glyphs2fontir"
 version = "0.6.0"
-source = "git+https://github.com/googlefonts/fontc#ca5d0a6f7150b497c52bdbf7b6d15d1195c0043b"
+source = "git+https://github.com/googlefonts/fontc#070cbeef2405deffbae4d1bc785965f965ec2391"
 dependencies = [
  "chrono",
  "env_logger 0.11.10",
@@ -2186,9 +2186,9 @@ dependencies = [
 
 [[package]]
 name = "glyphslib"
-version = "0.2.5"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "060ee3f586f744606092509310bec33658833294a12f3d0fdc303ab48c6fda93"
+checksum = "c404051709b5a3632b1744c747d4a9987f851966ca64119610a378876d11eca6"
 dependencies = [
  "itertools 0.14.0",
  "openstep-plist",
@@ -5179,9 +5179,9 @@ dependencies = [
 
 [[package]]
 name = "skrifa"
-version = "0.43.1"
+version = "0.43.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b17862a69012d5affd43fe184c71b652a128c8b00dce4a3657f5039df11d4a9"
+checksum = "4cbe997d0f2480442d727488fbe2150779114cbe480ecdbadef58b33e0318ffb"
 dependencies = [
  "bytemuck",
  "read-fonts 0.40.1",
@@ -5225,7 +5225,7 @@ dependencies = [
 [[package]]
 name = "sr-aef"
 version = "0.1.0"
-source = "git+https://github.com/simoncozens/babelfont-rs#a1a0b5f4640b3303008c1b49046c819820bf4c9d"
+source = "git+https://github.com/simoncozens/babelfont-rs#3b04c555b45bac2e7722ef6749b2a843ddb78d4a"
 dependencies = [
  "fea-rs-ast",
  "fontdrasil 0.4.0 (git+https://github.com/googlefonts/fontc?rev=3518040e)",
@@ -5535,7 +5535,7 @@ dependencies = [
 [[package]]
 name = "tilvisan"
 version = "0.1.0"
-source = "git+https://github.com/simoncozens/tilvisan#73283ea573ce4f5aa614dd29d19993a361186435"
+source = "git+https://github.com/simoncozens/tilvisan#e4d76fff966bde77b9a313d1d9c02f1aaa9f0f4a"
 dependencies = [
  "chrono",
  "clap",
@@ -5545,7 +5545,7 @@ dependencies = [
  "log",
  "logos",
  "paste",
- "skrifa 0.43.1",
+ "skrifa 0.43.2",
  "thiserror 2.0.18",
  "write-fonts 0.49.1",
 ]
@@ -5992,10 +5992,11 @@ dependencies = [
 [[package]]
 name = "ufo2fontir"
 version = "0.4.0"
-source = "git+https://github.com/googlefonts/fontc#ca5d0a6f7150b497c52bdbf7b6d15d1195c0043b"
+source = "git+https://github.com/googlefonts/fontc#070cbeef2405deffbae4d1bc785965f965ec2391"
 dependencies = [
  "chrono",
  "env_logger 0.11.10",
+ "fea-rs 0.22.0 (git+https://github.com/googlefonts/fontc)",
  "fontdrasil 0.4.0 (git+https://github.com/googlefonts/fontc)",
  "fontir 0.5.0 (git+https://github.com/googlefonts/fontc)",
  "glyphs-reader 0.5.0 (git+https://github.com/googlefonts/fontc)",

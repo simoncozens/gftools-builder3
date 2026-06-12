@@ -5,7 +5,7 @@ use crate::{
     operations::{addsubset::AddSubsetConfig, fix::FixConfig, fontc::FontcConfig},
     recipe::{ConfigOperation, Step},
 };
-use fontdrasil::coords::UserLocation;
+use babelfont::{DesignLocation, UserLocation};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
@@ -17,6 +17,7 @@ pub mod convert;
 pub mod fix;
 pub mod fontc;
 pub mod glyphs2ufo;
+pub mod instantiate_source;
 pub mod subspace;
 
 /// Enum representing the different operation steps available
@@ -40,6 +41,8 @@ pub(crate) enum OpStep {
     Subspace,
     #[serde(rename = "autohint")]
     Autohint,
+    #[serde(rename = "instantiateSource")]
+    InstantiateSource,
 }
 
 impl OpStep {
@@ -54,6 +57,7 @@ impl OpStep {
             OpStep::AddSubset => Box::new(addsubset::AddSubset::new()),
             OpStep::Subspace => Box::new(subspace::Subspace::new()),
             OpStep::Autohint => Box::new(autohint::Autohint::new()),
+            OpStep::InstantiateSource => Box::new(instantiate_source::InstantiateSource::new()),
         }
     }
 }
@@ -177,11 +181,27 @@ impl ConfigOperationBuilder {
         self
     }
 
-    pub fn autohint(mut self) -> Self {
+    pub fn autohint(mut self, args: Option<String>) -> Self {
         self.steps.push(Step::OperationStep {
             operation: OpStep::Autohint,
             extra: HashMap::new(),
-            args: None,
+            args,
+            input_file: None,
+            needs: vec![],
+        });
+        self
+    }
+
+    pub fn instantiate_source(mut self, location: &DesignLocation) -> Self {
+        self.steps.push(Step::OperationStep {
+            operation: OpStep::InstantiateSource,
+            extra: HashMap::new(),
+            args: Some(
+                location
+                    .iter()
+                    .map(|(axis, value)| format!("{}={}", axis, value.to_f64()))
+                    .join(","),
+            ),
             input_file: None,
             needs: vec![],
         });

@@ -1,13 +1,12 @@
 use std::collections::HashMap;
 
-use babelfont::{Font, Instance};
-use fontdrasil::coords::UserLocation;
+use babelfont::{Font, Instance, UserLocation};
 
 use crate::{
     error::ApplicationError,
     operations::{addsubset::AddSubsetConfig, fix::FixConfig, ConfigOperationBuilder, OpStep},
     recipe::{Provider, Recipe, Step},
-    recipe_providers::googlefonts::GoogleFontsOptions,
+    recipe_providers::googlefonts::{instance_user_location, GoogleFontsOptions},
 };
 
 pub type NotoOptions = GoogleFontsOptions; // They're the same these days
@@ -22,10 +21,6 @@ pub struct NotoProvider {
 struct ResolvedSubsetStep {
     donor_font: String,
     config: AddSubsetConfig,
-}
-
-fn big_hammer<T, U>(x: T) -> U {
-    unsafe { std::mem::transmute_copy(&x) }
 }
 
 impl NotoProvider {
@@ -225,24 +220,7 @@ impl NotoProvider {
         base_builder = base_builder.compile(&self.options.fontc_config);
 
         if source.instances.len() > 1 {
-            let loc: UserLocation = instance
-                .location
-                .iter()
-                .map(|(axis, value)| {
-                    (
-                        fontdrasil::types::Tag::new(&axis.into_bytes()),
-                        big_hammer(
-                            source
-                                .axes
-                                .iter()
-                                .find(|ax| ax.tag == *axis)
-                                .unwrap()
-                                .designspace_to_userspace(*value)
-                                .unwrap(),
-                        ),
-                    )
-                })
-                .collect();
+            let loc: UserLocation = instance_user_location(source, instance)?;
             base_builder = base_builder.instance(&loc);
         }
 
@@ -252,7 +230,13 @@ impl NotoProvider {
 
         // Hinted static
         let hinted_target = Self::static_target(&familyname_path, "hinted", &instancebase);
-        recipe.insert(hinted_target, base_builder.clone().autohint().build());
+        recipe.insert(
+            hinted_target,
+            base_builder
+                .clone()
+                .autohint(Some("--fail-ok".to_string()))
+                .build(),
+        );
 
         if !self.options.include_subsets.is_empty() {
             let mut full_builder = ConfigOperationBuilder::new().source(source_path);
@@ -260,37 +244,26 @@ impl NotoProvider {
             full_builder = full_builder.compile(&self.options.fontc_config);
 
             if source.instances.len() > 1 {
-                let loc: UserLocation = instance
-                    .location
-                    .iter()
-                    .map(|(axis, value)| {
-                        (
-                            fontdrasil::types::Tag::new(&axis.into_bytes()),
-                            big_hammer(
-                                source
-                                    .axes
-                                    .iter()
-                                    .find(|ax| ax.tag == *axis)
-                                    .unwrap()
-                                    .designspace_to_userspace(*value)
-                                    .unwrap(),
-                            ),
-                        )
-                    })
-                    .collect();
-                full_builder = full_builder.instance(&loc);
+                let user_loc = instance_user_location(source, instance)?;
+                full_builder = full_builder.instance(&user_loc);
             }
 
             // Full static: addSubset + compile + instance + autohint
             let full_target = Self::static_target(&familyname_path, "full", &instancebase);
-            recipe.insert(full_target, full_builder.clone().autohint().build());
+            recipe.insert(
+                full_target,
+                full_builder
+                    .clone()
+                    .autohint(Some("--fail-ok".to_string()))
+                    .build(),
+            );
 
             // Googlefonts static: addSubset + compile + instance + autohint + fix
             if !have_variables {
                 // Only build statics for GF if we don't have a variable
                 let googlefonts_target =
                     Self::static_target(&familyname_path, "googlefonts", &instancebase);
-                let mut gf_builder = full_builder.autohint();
+                let mut gf_builder = full_builder.autohint(Some("--fail-ok".to_string()));
                 gf_builder = gf_builder.fix(&self.options.fix_config);
                 recipe.insert(googlefonts_target, gf_builder.build());
             }
@@ -298,7 +271,7 @@ impl NotoProvider {
             // Googlefonts static without subset: compile + instance + autohint + fix
             let googlefonts_target =
                 Self::static_target(&familyname_path, "googlefonts", &instancebase);
-            let mut gf_builder = base_builder.autohint();
+            let mut gf_builder = base_builder.autohint(Some("--fail-ok".to_string()));
             gf_builder = gf_builder.fix(&self.options.fix_config);
             recipe.insert(googlefonts_target, gf_builder.build());
         }

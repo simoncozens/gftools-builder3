@@ -62,7 +62,6 @@ fn terminal_rows() -> usize {
 }
 
 fn select_progress_mode(progress: bool, target_count: usize) -> ProgressMode {
-    println!("Rows: {}, Targets: {}, Progress: {}", terminal_rows(), target_count, progress);
     if !progress {
         ProgressMode::Disabled
     } else if terminal_rows() < target_count {

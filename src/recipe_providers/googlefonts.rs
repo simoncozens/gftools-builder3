@@ -1,6 +1,5 @@
 use crate::recipe_providers::includesubsets::IncludeSubsetsOptions;
-use babelfont::{Font, Instance, UserCoord};
-use fontdrasil::coords::UserLocation;
+use babelfont::{Font, Instance, UserCoord, UserLocation};
 use serde::{Deserialize, Serialize};
 use serde_inline_default::serde_inline_default;
 use serde_json::Value;
@@ -44,10 +43,6 @@ pub(crate) struct ItalicDescriptor {
     max_value: UserCoord,
 }
 
-fn big_hammer<T, U>(x: T) -> U {
-    unsafe { std::mem::transmute_copy(&x) }
-}
-
 #[serde_inline_default]
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -80,9 +75,11 @@ pub struct GoogleFontsOptions {
 
     // Options about what we build
     #[serde_inline_default(true)]
+    #[serde(rename = "buildVariable")]
     pub build_variable: bool,
 
     #[serde_inline_default(true)]
+    #[serde(rename = "buildStatic")]
     pub build_static: bool,
 
     // Oops, OTFs don't exist in the fontc universe
@@ -356,7 +353,7 @@ impl GoogleFontsProvider {
         }
         for source in self.sources.iter() {
             for instance in source.instances.iter() {
-                let recipe = if source.masters.len() > 1  {
+                let recipe = if source.masters.len() > 1 && self.options.build_variable {
                     self.instantiate_a_static(source, instance, FontFormat::TTF)?
                 } else {
                     self.build_a_static(source, instance, FontFormat::TTF)?
@@ -405,28 +402,11 @@ impl GoogleFontsProvider {
         let vf_filename = self.vf_source_for_instance(source, instance)?;
         let mut builder = ConfigOperationBuilder::new().source(vf_filename);
         if source.instances.len() > 1 {
-            let loc: UserLocation = instance
-                .location
-                .iter()
-                .map(|(axis, value)| {
-                    (
-                        fontdrasil::types::Tag::new(&axis.into_bytes()),
-                        big_hammer(
-                            source
-                                .axes
-                                .iter()
-                                .find(|ax| ax.tag == *axis)
-                                .unwrap()
-                                .designspace_to_userspace(*value)
-                                .unwrap(),
-                        ),
-                    )
-                })
-                .collect();
-            builder = builder.instance(&loc);
+            let user_loc = instance_user_location(source, instance)?;
+            builder = builder.instance(&user_loc);
         }
         // Autohint steps
-        builder = builder.autohint();
+        builder = builder.autohint(None);
         // VTT steps
         builder = builder.fix(&self.options.fix_config);
 
@@ -547,6 +527,11 @@ impl GoogleFontsProvider {
                 .to_string(),
         );
         builder = self.add_subset_steps(builder)?;
+        // If there are more than 1 masters, we need to slim down the font to 
+        // the master and instance location specified.
+        if source.masters.len() > 1 {
+           builder =  builder.instantiate_source(&instance.location);
+        }
         builder = builder.compile(&self.options.fontc_config);
         // Any post-compile steps
         // Any VTT steps
@@ -622,4 +607,35 @@ impl GoogleFontsProvider {
         }
         Ok(builder)
     }
+}
+
+
+
+pub fn instance_user_location(
+    source: &Font,
+    instance: &Instance,
+) -> Result<UserLocation, ApplicationError> {
+    let design_loc = &instance.location;
+    let mut user_loc: UserLocation = UserLocation::default();
+    for axis in source.axes.iter() {
+        let design_coord = design_loc.get(axis.tag);
+        let Some(user_coord) = design_coord
+            .map(|d| axis.designspace_to_userspace(d))
+            .transpose()
+            .map_err(|_| {
+                ApplicationError::InvalidRecipe(format!(
+                    "Failed to convert design coordinate {:?} for axis {} to user coordinate",
+                    design_coord, axis.tag
+                ))
+            })?
+            .or(axis.default)
+        else {
+            return Err(ApplicationError::InvalidRecipe(format!(
+            "Instance location is missing coordinate for axis {} and axis does not have a default",
+            axis.tag
+        )));
+        };
+        user_loc.insert(axis.tag, user_coord);
+    }
+    Ok(user_loc)
 }
