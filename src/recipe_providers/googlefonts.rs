@@ -288,7 +288,6 @@ impl GoogleFontsProvider {
 
     fn load_all_sources(&mut self) -> Result<(), ApplicationError> {
         for source in &self.options.sources {
-            log::debug!("Loading source font: {}", source);
             let font = babelfont::load(source).map_err(|e| {
                 ApplicationError::InvalidRecipe(format!("Failed to load source {source}: {e}"))
             })?;
@@ -358,6 +357,24 @@ impl GoogleFontsProvider {
                 } else {
                     self.build_a_static(source, instance, FontFormat::TTF)?
                 };
+                self.recipe.extend(recipe);
+            }
+            // If there are no instances, build at default
+            if source.instances.is_empty() {
+                let default_instance = Instance {
+
+                    // Try in order: Preferred Subfamily Name, Style Name, styleMapStyleName "Regular"
+                    name: source
+                        .names
+                        .preferred_subfamily_name
+                        .get_default()
+                        .or_else(|| source.names.wws_subfamily_name.get_default())
+                        .unwrap_or(&"Regular".to_string())
+                        .into(),
+                    ..Default::default()
+                };
+                println!("Font names: {:?}", source.names);
+                let recipe = self.build_a_static(source, &default_instance, FontFormat::TTF)?;
                 self.recipe.extend(recipe);
             }
         }
