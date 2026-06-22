@@ -350,9 +350,34 @@ impl GoogleFontsProvider {
         if !self.options.build_static {
             return Ok(());
         }
+        // Multi-master named instances must be produced by INTERPOLATING the design space, not by
+        // babelfont's SetDefaultLocation (the old `build_a_static` path), which only re-labels an
+        // existing master and hard-fails ("No master was present at location" / "Default value not in
+        // map") on any instance whose location doesn't coincide with a master. The correct, interpolating
+        // path is `instantiate_a_static`: build the VF once and subspace it (fontc's instancer). That path
+        // sources a VF target produced by `build_all_variables`, which is skipped when build_variable is
+        // off — so for static-only families we first build that VF here as an INTERMEDIATE.
+        // NOTE: the intermediate VF is currently also emitted as an output; marking it temp-only is a
+        // follow-up. Needs a host compile of builder3 to verify (cannot build builder3 in the VM).
+        if !self.options.build_variable {
+            let mut vf_recipes = Vec::new();
+            for source in self.sources.iter().filter(|s| s.masters.len() > 1) {
+                if let Some(italic_ds) = self.has_slant_italic(source) {
+                    vf_recipes.push(self.build_a_variable(source, Some(&italic_ds), Style::Italic, None)?);
+                    vf_recipes.push(self.build_a_variable(source, Some(&italic_ds), Style::Roman, None)?);
+                } else {
+                    vf_recipes.push(self.build_a_variable(source, None, Style::Roman, None)?);
+                }
+            }
+            for recipe in vf_recipes {
+                self.recipe.extend(recipe);
+            }
+        }
         for source in self.sources.iter() {
             for instance in source.instances.iter() {
-                let recipe = if source.masters.len() > 1 && self.options.build_variable {
+                let recipe = if source.masters.len() > 1 {
+                    // interpolate via Subspace regardless of build_variable (was gated on it, which
+                    // routed static-only families into the non-interpolating build_a_static)
                     self.instantiate_a_static(source, instance, FontFormat::TTF)?
                 } else {
                     self.build_a_static(source, instance, FontFormat::TTF)?
