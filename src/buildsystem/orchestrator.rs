@@ -93,7 +93,8 @@ fn get_target_files(context: &Context, index: NodeIndex) -> Vec<String> {
             if let Some(node_weight) = context.configuration.graph().node_weight(edge.target())
                 && node_weight.shortname() == "Sink"
                 && let Ok(output_lock) = edge.weight().output.lock()
-                && let crate::buildsystem::output::RawOperationOutput::NamedFile(name) = &*output_lock
+                && let crate::buildsystem::output::RawOperationOutput::NamedFile(name) =
+                    &*output_lock
             {
                 targets.push(name.clone());
                 continue;
@@ -153,7 +154,12 @@ pub async fn run(
             .await
         }
         ProgressMode::Disabled | ProgressMode::PerTarget => {
-            try_join_all(target_futures.into_iter().map(|(_, build_future)| build_future)).await
+            try_join_all(
+                target_futures
+                    .into_iter()
+                    .map(|(_, build_future)| build_future),
+            )
+            .await
         }
     };
 
@@ -289,12 +295,7 @@ async fn run_op(
         targets = %outputs_str
     );
 
-    let description = format!(
-        "{}: {} -> {}",
-        op.description(),
-        inputs_str,
-        outputs_str,
-    );
+    let description = format!("{}: {} -> {}", op.description(), inputs_str, outputs_str,);
 
     let target_summary = if final_targets.is_empty() {
         outputs_str.clone()
@@ -304,7 +305,9 @@ async fn run_op(
 
     let failure_context = format!(
         "operation '{}' while building [{}] from [{}]",
-        op.shortname(), target_summary, inputs_str
+        op.shortname(),
+        target_summary,
+        inputs_str
     );
 
     let inner = async {

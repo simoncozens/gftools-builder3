@@ -4,7 +4,7 @@ use crate::{
     buildsystem::{DataKind, Operation, OperationOutput},
     error::ApplicationError,
 };
-use tilvisan::{autohint, Args};
+use tilvisan::{Args, autohint};
 
 #[derive(PartialEq, Debug, Default)]
 pub(crate) struct Autohint {

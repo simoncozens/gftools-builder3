@@ -211,7 +211,8 @@ impl OperationOutput {
         let mut f = self.lock().map_err(|_| ApplicationError::MutexPoisoned)?;
         match &mut *f {
             RawOperationOutput::NamedFile(name) => {
-                std::fs::write(&*name, bytes).map_err(|e| ApplicationError::Other(e.to_string()))?;
+                std::fs::write(&*name, bytes)
+                    .map_err(|e| ApplicationError::Other(e.to_string()))?;
             }
             RawOperationOutput::TemporaryFile(Some(temp_file)) => {
                 std::fs::write(temp_file.path(), bytes)

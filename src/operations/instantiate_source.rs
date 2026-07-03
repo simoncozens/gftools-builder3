@@ -1,8 +1,8 @@
 use std::{os::unix::process::ExitStatusExt as _, process::Output};
 
 use babelfont::{
-    filters::{DropVariations, FontFilter, SetDefaultLocation},
     DesignCoord, DesignLocation, Tag,
+    filters::{DropVariations, FontFilter, SetDefaultLocation},
 };
 
 use crate::{

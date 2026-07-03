@@ -4,9 +4,9 @@ use babelfont::{Font, Instance, UserLocation};
 
 use crate::{
     error::ApplicationError,
-    operations::{addsubset::AddSubsetConfig, fix::FixConfig, ConfigOperationBuilder, OpStep},
+    operations::{ConfigOperationBuilder, OpStep, addsubset::AddSubsetConfig, fix::FixConfig},
     recipe::{Provider, Recipe, Step},
-    recipe_providers::googlefonts::{instance_user_location, GoogleFontsOptions},
+    recipe_providers::googlefonts::{GoogleFontsOptions, instance_user_location},
 };
 
 pub type NotoOptions = GoogleFontsOptions; // They're the same these days

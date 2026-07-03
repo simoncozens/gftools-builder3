@@ -362,7 +362,6 @@ impl GoogleFontsProvider {
             // If there are no instances, build at default
             if source.instances.is_empty() {
                 let default_instance = Instance {
-
                     // Try in order: Preferred Subfamily Name, Style Name, styleMapStyleName "Regular"
                     name: source
                         .names
@@ -506,7 +505,6 @@ impl GoogleFontsProvider {
         Ok(recipe)
     }
 
-
     fn build_a_static(
         &self,
         source: &Font,
@@ -528,10 +526,18 @@ impl GoogleFontsProvider {
             .get_default()
             .unwrap_or(&"Unknown".to_string())
             .replace(" ", "");
-        let style_name = instance.name.get_default().unwrap_or(&"Regular".to_string()).replace(" ", "");
+        let style_name = instance
+            .name
+            .get_default()
+            .unwrap_or(&"Regular".to_string())
+            .replace(" ", "");
         let instance_base = format!("{}-{}", family_name, style_name);
 
-        let target = self.options.static_filename(&instance_base, self.options.filename_suffix.as_deref(), None);
+        let target = self.options.static_filename(
+            &instance_base,
+            self.options.filename_suffix.as_deref(),
+            None,
+        );
         log::debug!("Static target filename: {}", target);
 
         let mut builder = ConfigOperationBuilder::new();
@@ -544,10 +550,10 @@ impl GoogleFontsProvider {
                 .to_string(),
         );
         builder = self.add_subset_steps(builder)?;
-        // If there are more than 1 masters, we need to slim down the font to 
+        // If there are more than 1 masters, we need to slim down the font to
         // the master and instance location specified.
         if source.masters.len() > 1 {
-           builder =  builder.instantiate_source(&instance.location);
+            builder = builder.instantiate_source(&instance.location);
         }
         builder = builder.compile(&self.options.fontc_config);
         // Any post-compile steps
@@ -626,8 +632,6 @@ impl GoogleFontsProvider {
     }
 }
 
-
-
 pub fn instance_user_location(
     source: &Font,
     instance: &Instance,
@@ -639,18 +643,18 @@ pub fn instance_user_location(
         let Some(user_coord) = design_coord
             .map(|d| axis.designspace_to_userspace(d))
             .transpose()
-            .map_err(|_| {
+            .map_err(|e| {
                 ApplicationError::InvalidRecipe(format!(
-                    "Failed to convert design coordinate {:?} for axis {} to user coordinate",
-                    design_coord, axis.tag
+                    "Failed to convert design coordinate {:?} for axis {} to user coordinate: {:?}",
+                    design_coord, axis.tag, e
                 ))
             })?
             .or(axis.default)
         else {
             return Err(ApplicationError::InvalidRecipe(format!(
-            "Instance location is missing coordinate for axis {} and axis does not have a default",
-            axis.tag
-        )));
+                "Instance location is missing coordinate for axis {} and axis does not have a default",
+                axis.tag
+            )));
         };
         user_loc.insert(axis.tag, user_coord);
     }
