@@ -1,0 +1,30 @@
+# Builds the gftools-builder binary on every push to main and publishes it to
+# a rolling "main-latest" release, so every downstream font repo can download
+# one shared binary instead of compiling gftools-builder itself.
+name: Publish gftools-builder binary
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build release binary
+        run: cargo build --release --locked --bin gftools-builder
+      - name: Stage binary
+        run: cp target/release/gftools-builder gftools-builder-x86_64-linux
+      - name: Publish to the main-latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view main-latest >/dev/null 2>&1 \
+            || gh release create main-latest --title "Latest main build" \
+                 --notes "Rolling build of the main branch, refreshed on every push." --prerelease
+          gh release upload main-latest gftools-builder-x86_64-linux --clobber
