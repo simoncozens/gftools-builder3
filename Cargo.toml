@@ -22,7 +22,7 @@ clap = "4.5.40"
 dashmap = "6.1.0"
 env_logger = "0.11"
 fontc = { git = "https://github.com/googlefonts/fontc", version = "0.6.0" }
-skera = { git = "https://github.com/googlefonts/fontations", branch = "skera-variations-final" }
+skeravar = { git = "https://github.com/simoncozens/skeravar" }
 read-fonts = { git = "https://github.com/googlefonts/fontations", branch = "skera-variations-final" }
 futures = "0.3"
 google-fonts-axisregistry = { git = "https://github.com/googlefonts/axisregistry", features = [

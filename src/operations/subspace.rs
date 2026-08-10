@@ -7,7 +7,7 @@ use read_fonts::{
     collections::int_set::IntSet,
     types::{GlyphId, NameId, Tag},
 };
-use skera::{Plan, parse_instancing_spec, subset_font};
+use skeravar::{Plan, parse_instancing_spec, subset_font};
 use std::{os::unix::process::ExitStatusExt, process::Output};
 use tracing::info_span;
 
@@ -49,9 +49,9 @@ impl Operation for Subspace {
             &IntSet::<GlyphId>::all(),
             &IntSet::<u32>::all(),
             &fontref,
-            skera::SubsetFlags::SUBSET_FLAGS_DEFAULT
-                | skera::SubsetFlags::SUBSET_FLAGS_UPDATE_NAME_TABLE
-                | skera::SubsetFlags::SUBSET_FLAGS_GLYPH_NAMES,
+            skeravar::SubsetFlags::SUBSET_FLAGS_DEFAULT
+                | skeravar::SubsetFlags::SUBSET_FLAGS_UPDATE_NAME_TABLE
+                | skeravar::SubsetFlags::SUBSET_FLAGS_GLYPH_NAMES,
             &IntSet::<Tag>::empty(),
             &IntSet::<Tag>::all(),
             &IntSet::<Tag>::all(),
