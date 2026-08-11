@@ -5612,8 +5612,9 @@ dependencies = [
 
 [[package]]
 name = "tilvisan"
-version = "0.1.0"
-source = "git+https://github.com/simoncozens/tilvisan#4166971622b490dde92b495abff194cd9e9889a6"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3397acd96933434dfce7df2505b6971b0e15c8d750f2b328a498c9edec0e416"
 dependencies = [
  "chrono",
  "clap",
